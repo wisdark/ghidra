@@ -60,7 +60,8 @@ public class VariableOffset {
 
 	/**
 	 * Constructor for an explicit variable reference.
-	 * @param vref
+	 * @param ref the reference
+	 * @param var the variable being referenced
 	 */
 	public VariableOffset(Reference ref, Variable var) {
 
@@ -159,7 +160,8 @@ public class VariableOffset {
 				}
 				if (dt instanceof Structure) {
 					DataTypeComponent cdt = ((Structure) dt).getComponentAt(intOff);
-					if (cdt == null) {
+					if (cdt == null || cdt.isBitFieldComponent()) {
+						// NOTE: byte offset is insufficient to identify a specific bitfield
 						break;
 					}
 					String fieldName = cdt.getFieldName();
@@ -195,7 +197,7 @@ public class VariableOffset {
 			absOffset = intOff;
 		}
 
-		List<Object> list = new ArrayList<Object>();
+		List<Object> list = new ArrayList<>();
 		list.add(new LabelString(name.toString(), LabelString.VARIABLE));
 
 		if (absOffset != 0 || scalarAdjustment != 0) {

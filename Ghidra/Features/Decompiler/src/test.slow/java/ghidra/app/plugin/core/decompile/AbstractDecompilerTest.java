@@ -15,10 +15,18 @@
  */
 package ghidra.app.plugin.core.decompile;
 
+import static org.junit.Assert.*;
+
+import java.util.List;
+
 import org.junit.After;
 import org.junit.Before;
 
 import docking.widgets.fieldpanel.FieldPanel;
+import docking.widgets.fieldpanel.field.Field;
+import docking.widgets.fieldpanel.support.FieldLocation;
+import ghidra.app.decompiler.ClangToken;
+import ghidra.app.decompiler.component.ClangTextField;
 import ghidra.app.decompiler.component.DecompilerPanel;
 import ghidra.test.AbstractProgramBasedTest;
 
@@ -61,17 +69,87 @@ public abstract class AbstractDecompilerTest extends AbstractProgramBasedTest {
 	}
 
 	protected void waitForDecompiler() {
-		waitForCondition(() -> !provider.isDecompiling());
+		waitForSwing();
+		waitForCondition(() -> !provider.isBusy());
 		waitForSwing();
 	}
 
 	protected void setDecompilerLocation(int line, int charPosition) {
+
 		runSwing(() -> provider.setCursorLocation(line, charPosition));
+		DecompilerPanel panel = provider.getDecompilerPanel();
+		FieldPanel fp = panel.getFieldPanel();
+		click(fp, 1, true);
+		waitForSwing();
 	}
 
 	protected void doubleClick() {
 		DecompilerPanel panel = provider.getDecompilerPanel();
 		FieldPanel fp = panel.getFieldPanel();
 		click(fp, 2, true);
+		waitForSwing();
+	}
+
+	protected FieldLocation loc(int lineNumber, int col) {
+		FieldLocation loc = new FieldLocation(lineNumber - 1, 0, 0, col);
+		return loc;
+	}
+
+	protected ClangTextField getFieldForLine(int lineNumber) {
+
+		DecompilerPanel panel = provider.getDecompilerPanel();
+		List<Field> fields = panel.getFields();
+		Field line = fields.get(lineNumber - 1); // -1 for 1-based line number
+		return (ClangTextField) line;
+	}
+
+	// note: the index is 0-based; use getFieldForLine() when using 1-based line numbers
+	protected ClangTextField getFieldForIndex(int lineIndex) {
+
+		DecompilerPanel panel = provider.getDecompilerPanel();
+		List<Field> fields = panel.getFields();
+		Field line = fields.get(lineIndex);
+		return (ClangTextField) line;
+	}
+
+	protected ClangToken getToken(int line, int col) {
+		FieldLocation loc = loc(line, col);
+		ClangTextField field = getFieldForLine(line);
+		ClangToken token = field.getToken(loc);
+		return token;
+	}
+
+	protected ClangToken getToken(FieldLocation loc) {
+		int lineNumber = loc.getIndex().intValue() + 1; // 0-based
+		ClangTextField field = getFieldForLine(lineNumber);
+		ClangToken token = field.getToken(loc);
+		return token;
+	}
+
+	protected DecompilerPanel getDecompilerPanel() {
+		return provider.getDecompilerPanel();
+	}
+
+	/**
+	 * Returns the token under the cursor
+	 * @return the token under the cursor
+	 */
+	protected ClangToken getToken() {
+		DecompilerPanel panel = getDecompilerPanel();
+		FieldLocation loc = panel.getCursorPosition();
+		return getToken(loc);
+	}
+
+	protected String getTokenText(FieldLocation loc) {
+		ClangToken token = getToken(loc);
+		return token.getText();
+	}
+
+	protected void assertToken(String tokenText, int line, int... cols) {
+		for (int col : cols) {
+			ClangToken token = getToken(line, col);
+			String text = token.getText();
+			assertEquals(tokenText, text);
+		}
 	}
 }

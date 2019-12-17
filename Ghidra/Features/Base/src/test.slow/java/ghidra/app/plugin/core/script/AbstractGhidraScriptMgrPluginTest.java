@@ -20,8 +20,7 @@ import static org.junit.Assert.*;
 import java.awt.Window;
 import java.io.*;
 import java.lang.reflect.InvocationTargetException;
-import java.util.List;
-import java.util.Map;
+import java.util.*;
 import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicInteger;
@@ -41,7 +40,8 @@ import docking.widgets.filter.FilterTextField;
 import docking.widgets.pathmanager.PathManager;
 import docking.widgets.table.GDynamicColumnTableModel;
 import docking.widgets.table.RowObjectTableModel;
-import docking.widgets.tree.*;
+import docking.widgets.tree.GTree;
+import docking.widgets.tree.GTreeNode;
 import generic.jar.ResourceFile;
 import generic.test.TestUtils;
 import generic.util.Path;
@@ -60,6 +60,7 @@ import ghidra.util.exception.CancelledException;
 import ghidra.util.table.GhidraTable;
 import ghidra.util.table.GhidraTableFilterPanel;
 import ghidra.util.task.*;
+import util.CollectionUtils;
 import utilities.util.FileUtilities;
 
 public abstract class AbstractGhidraScriptMgrPluginTest
@@ -194,7 +195,7 @@ public abstract class AbstractGhidraScriptMgrPluginTest
 		waitForTree(categoryTree);
 		JTree jTree = (JTree) invokeInstanceMethod("getJTree", categoryTree);
 		assertNotNull(jTree);
-		GTreeNode child = categoryTree.getRootNode().getChild(category);
+		GTreeNode child = categoryTree.getModelRoot().getChild(category);
 		categoryTree.setSelectedNode(child);
 		waitForTree(categoryTree);
 		TreePath path = child.getTreePath();
@@ -272,10 +273,18 @@ public abstract class AbstractGhidraScriptMgrPluginTest
 		assertTrue(message, fullText.contains(piece));
 	}
 
-	protected void assertRunLastActionEnabled(boolean enabled) {
-		final DockingActionIf runLastAction = getAction(plugin, "Rerun Last Script");
-		assertNotNull(runLastAction);
+	private DockingActionIf getRunLastScriptAction() {
+		// note: this provider adds 2 versions of the same action--pick either
+		Set<DockingActionIf> actions =
+			getActionsByOwnerAndName(plugin.getTool(), plugin.getName(), "Rerun Last Script");
+		assertFalse(actions.isEmpty());
+		DockingActionIf runLastAction = CollectionUtils.any(actions);
+		return runLastAction;
+	}
 
+	protected void assertRunLastActionEnabled(boolean enabled) {
+
+		DockingActionIf runLastAction = getRunLastScriptAction();
 		final AtomicReference<Boolean> ref = new AtomicReference<>();
 		runSwing(() -> ref.set(runLastAction.isEnabledForContext(new ActionContext())));
 		assertEquals("Run Last Action not enabled as expected", enabled, ref.get());
@@ -557,17 +566,15 @@ public abstract class AbstractGhidraScriptMgrPluginTest
 	}
 
 	protected void pressRunLastScriptButton() {
-		DockingActionIf action =
-			getAction(plugin, GhidraScriptActionManager.RERUN_LAST_SHARED_ACTION_NAME);
-		performAction(action, false);
+		DockingActionIf runLastAction = getRunLastScriptAction();
+		performAction(runLastAction, false);
 		waitForSwing();
 	}
 
 	protected void performGlobalRunLastScriptAction() {
-		DockingActionIf action =
-			getAction(plugin, GhidraScriptActionManager.GLOBAL_RERUN_LAST_SHARED_ACTION_NAME);
-		performAction(action, false);
-		waitForSwing();
+		// note: this action used to be different from the 'run last script'; currently they are
+		// 		 the same
+		pressRunLastScriptButton();
 	}
 
 	protected KeyBindingInputDialog pressKeyBindingAction() {
@@ -710,7 +717,7 @@ public abstract class AbstractGhidraScriptMgrPluginTest
 		GTree tree = (GTree) getInstanceField("scriptCategoryTree", provider);
 		waitForTree(tree);
 
-		GTreeNode parentNode = tree.getRootNode();
+		GTreeNode parentNode = tree.getModelRoot();
 
 		String[] parts = newCategory.split("\\.");
 		for (String category : parts) {
@@ -720,7 +727,7 @@ public abstract class AbstractGhidraScriptMgrPluginTest
 	}
 
 	protected GTreeNode findChildByName(GTreeNode node, String name) {
-		List<GTreeNode> children = node.getAllChildren();
+		List<GTreeNode> children = node.getChildren();
 		for (GTreeNode child : children) {
 			if (child.getName().equals(name)) {
 				return child;
@@ -733,8 +740,8 @@ public abstract class AbstractGhidraScriptMgrPluginTest
 		GTree tree = (GTree) getInstanceField("scriptCategoryTree", provider);
 		waitForTree(tree);
 
-		GTreeRootNode rootNode = tree.getRootNode();
-		List<GTreeNode> children = rootNode.getAllChildren();
+		GTreeNode rootNode = tree.getModelRoot();
+		List<GTreeNode> children = rootNode.getChildren();
 		for (GTreeNode node : children) {
 			if (node.getName().equals(oldCategory)) {
 				Assert.fail("Category in tree when expected not to be: " + oldCategory);
@@ -1065,13 +1072,13 @@ public abstract class AbstractGhidraScriptMgrPluginTest
 	protected void assertSaveButtonEnabled() {
 		waitForSwing();
 		DockingActionIf saveAction = getAction(plugin, "Save Script");
-		assertTrue(saveAction.isEnabled());
+		assertTrue(saveAction.isEnabledForContext(editor.getActionContext(null)));
 	}
 
 	protected void assertSaveButtonDisabled() {
 		waitForSwing();
 		DockingActionIf saveAction = getAction(plugin, "Save Script");
-		assertFalse(saveAction.isEnabled());
+		assertFalse(saveAction.isEnabledForContext(editor.getActionContext(null)));
 
 		assertEditorHasNoChanges();
 	}
@@ -1293,7 +1300,7 @@ public abstract class AbstractGhidraScriptMgrPluginTest
 	protected void assertToolKeyBinding(KeyStroke ks) {
 		String actionOwner = GhidraScriptMgrPlugin.class.getSimpleName();
 		PluginTool tool = env.getTool();
-		List<DockingActionIf> actions = tool.getDockingActionsByOwnerName(actionOwner);
+		Set<DockingActionIf> actions = getActionsByOwner(tool, actionOwner);
 		for (DockingActionIf action : actions) {
 			KeyStroke keyBinding = action.getKeyBinding();
 			if (keyBinding == null) {

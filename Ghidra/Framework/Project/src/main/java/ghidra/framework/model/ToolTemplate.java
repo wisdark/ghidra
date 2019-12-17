@@ -19,7 +19,7 @@ import javax.swing.ImageIcon;
 
 import org.jdom.Element;
 
-import ghidra.framework.project.tool.ToolIconURL;
+import docking.util.image.ToolIconURL;
 
 /**
  * Configuration of a tool that knows how to create tools.
@@ -57,7 +57,7 @@ public interface ToolTemplate {
 
 	/**
 	 * Get the icon for this tool template.  This is equivalent to calling
-	 * <tt>getIconURL().getIcon()</tt>
+	 * <code>getIconURL().getIcon()</code>
 	 * @return the icon for this tool template.
 	 */
 	ImageIcon getIcon();

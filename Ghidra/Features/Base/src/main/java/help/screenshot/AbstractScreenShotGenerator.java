@@ -37,6 +37,7 @@ import docking.*;
 import docking.action.DockingActionIf;
 import docking.framework.ApplicationInformationDisplayFactory;
 import docking.options.editor.OptionsDialog;
+import docking.tool.ToolConstants;
 import docking.widgets.dialogs.SettingsDialog;
 import docking.widgets.fieldpanel.FieldPanel;
 import docking.widgets.fieldpanel.field.Field;
@@ -212,13 +213,12 @@ public abstract class AbstractScreenShotGenerator extends AbstractGhidraHeadedIn
 
 	public void performAction(String actionName, String owner, ComponentProvider contextProvider,
 			boolean wait) {
-		String fullActionName = actionName + " (" + owner + ")";
-		List<DockingActionIf> action = tool.getDockingActionsByFullActionName(fullActionName);
-		performAction(action.get(0), contextProvider, wait);
+		DockingActionIf action = getAction(tool, owner, actionName);
+		performAction(action, contextProvider, wait);
 	}
 
 	public void showOptions(final String optionsCategoryName) {
-		performAction("Edit Options", "Tool", false);
+		performAction("Edit Options", ToolConstants.TOOL_OWNER, false);
 		final OptionsDialog dialog = (OptionsDialog) getDialog();
 		runSwing(() -> dialog.displayCategory(optionsCategoryName, null));
 
@@ -1364,7 +1364,7 @@ public abstract class AbstractScreenShotGenerator extends AbstractGhidraHeadedIn
 	 * screen coordinates.   This allows you to capture a sub-component of a UI, drawing
 	 * rectangles around children of said sub-component.
 	 * 
-	 * <P>If you are unsure of what to pass for <tt>root</tt>, the call 
+	 * <P>If you are unsure of what to pass for <code>root</code>, the call 
 	 * {@link #drawRectangleAround(JComponent, Color, int)} instead.
 	 * 
 	 * @param component the component to be en-rectangled

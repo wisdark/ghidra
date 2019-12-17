@@ -1,6 +1,5 @@
 /* ###
  * IP: GHIDRA
- * REVIEWED: YES
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -16,17 +15,19 @@
  */
 package ghidra.app.plugin.core.compositeeditor;
 
-import ghidra.util.exception.UsrException;
-
 import java.awt.event.KeyEvent;
 
 import javax.swing.ImageIcon;
 import javax.swing.KeyStroke;
 
-import resources.ResourceManager;
 import docking.ActionContext;
 import docking.action.KeyBindingData;
 import docking.widgets.OptionDialog;
+import ghidra.util.exception.CancelledException;
+import ghidra.util.exception.UsrException;
+import ghidra.util.task.TaskLauncher;
+import ghidra.util.task.TaskMonitor;
+import resources.ResourceManager;
 
 /**
  * Action for use in the composite data type editor.
@@ -42,7 +43,7 @@ public class UnpackageAction extends CompositeEditorTableAction {
 	private KeyStroke keyStroke = KeyStroke.getKeyStroke(KeyEvent.VK_EQUALS, 0);
 	private static String[] popupPath = new String[] { ACTION_NAME };
 
-	public UnpackageAction(CompositeEditorProvider provider) {
+	public UnpackageAction(StructureEditorProvider provider) {
 		super(provider, EDIT_ACTION_PREFIX + ACTION_NAME, GROUP_NAME, popupPath, null,
 			unpackageIcon);
 		setDescription(DESCRIPTION);
@@ -65,18 +66,26 @@ public class UnpackageAction extends CompositeEditorTableAction {
 				return;
 			}
 		}
+
+		TaskLauncher.launchModal("Unpackaging Component",
+			monitor -> doUnpackage(currentRowIndex, monitor));
+
+		requestTableFocus();
+	}
+
+	private void doUnpackage(int row, TaskMonitor monitor) {
 		try {
-			model.unpackage(currentRowIndex);
+			((StructureEditorModel) model).unpackage(row, monitor);
+		}
+		catch (CancelledException e) {
+			// user cancelled
 		}
 		catch (UsrException e1) {
 			model.setStatus(e1.getMessage(), true);
 		}
-		requestTableFocus();
+		model.fireTableDataChanged();
 	}
 
-	/* (non-Javadoc)
-	 * @see ghidra.app.plugin.datamanager.editor.CompositeEditorAction#adjustEnablement()
-	 */
 	@Override
 	public void adjustEnablement() {
 		setEnabled(model.isUnpackageAllowed());
