@@ -1150,11 +1150,11 @@ public class Disassembler implements DisassemblerConflictHandler {
 			throws InsufficientBytesException, UnknownInstructionException,
 			AddressOverflowException, NestedDelaySlotException {
 
+		List<PseudoInstruction> delaySlotList = parseDelaySlots(inst, blockMemBuffer, block);
+
 		if (followFlow) {
 			processInstructionFlows(inst, block);
 		}
-
-		List<PseudoInstruction> delaySlotList = parseDelaySlots(inst, blockMemBuffer, block);
 
 		block.addInstruction(inst);
 
@@ -1313,7 +1313,7 @@ public class Disassembler implements DisassemblerConflictHandler {
 				disassemblerContext.getRegisterValue(disassemblerContext.getBaseContextRegister()),
 				instAddr, e.getMessage());
 		}
-		return null; // error occured
+		return null; // error occurred
 	}
 
 	/**

@@ -17,6 +17,7 @@ package ghidra.app.plugin.core.decompile;
 
 import static org.junit.Assert.*;
 
+import java.awt.Point;
 import java.util.List;
 
 import org.junit.After;
@@ -76,10 +77,15 @@ public abstract class AbstractDecompilerTest extends AbstractProgramBasedTest {
 
 	protected void setDecompilerLocation(int line, int charPosition) {
 
-		runSwing(() -> provider.setCursorLocation(line, charPosition));
 		DecompilerPanel panel = provider.getDecompilerPanel();
 		FieldPanel fp = panel.getFieldPanel();
-		click(fp, 1, true);
+		FieldLocation loc = loc(line, charPosition);
+
+		// scroll to the field to make sure it has been built so that we can get its point
+		fp.scrollTo(loc);
+		Point p = fp.getPointForLocation(loc);
+
+		click(fp, p, 1, true);
 		waitForSwing();
 	}
 
@@ -103,6 +109,14 @@ public abstract class AbstractDecompilerTest extends AbstractProgramBasedTest {
 		return (ClangTextField) line;
 	}
 
+	protected ClangTextField getFieldForLine(DecompilerProvider theProvider, int lineNumber) {
+
+		DecompilerPanel panel = theProvider.getDecompilerPanel();
+		List<Field> fields = panel.getFields();
+		Field line = fields.get(lineNumber - 1); // -1 for 1-based line number
+		return (ClangTextField) line;
+	}
+
 	// note: the index is 0-based; use getFieldForLine() when using 1-based line numbers
 	protected ClangTextField getFieldForIndex(int lineIndex) {
 
@@ -113,15 +127,16 @@ public abstract class AbstractDecompilerTest extends AbstractProgramBasedTest {
 	}
 
 	protected ClangToken getToken(int line, int col) {
-		FieldLocation loc = loc(line, col);
-		ClangTextField field = getFieldForLine(line);
-		ClangToken token = field.getToken(loc);
-		return token;
+		return getToken(loc(line, col));
 	}
 
 	protected ClangToken getToken(FieldLocation loc) {
+		return getToken(provider, loc);
+	}
+
+	protected ClangToken getToken(DecompilerProvider theProvider, FieldLocation loc) {
 		int lineNumber = loc.getIndex().intValue() + 1; // 0-based
-		ClangTextField field = getFieldForLine(lineNumber);
+		ClangTextField field = getFieldForLine(theProvider, lineNumber);
 		ClangToken token = field.getToken(loc);
 		return token;
 	}
@@ -135,9 +150,13 @@ public abstract class AbstractDecompilerTest extends AbstractProgramBasedTest {
 	 * @return the token under the cursor
 	 */
 	protected ClangToken getToken() {
-		DecompilerPanel panel = getDecompilerPanel();
+		return getToken(provider);
+	}
+
+	protected ClangToken getToken(DecompilerProvider theProvider) {
+		DecompilerPanel panel = theProvider.getDecompilerPanel();
 		FieldLocation loc = panel.getCursorPosition();
-		return getToken(loc);
+		return getToken(theProvider, loc);
 	}
 
 	protected String getTokenText(FieldLocation loc) {

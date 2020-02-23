@@ -16,6 +16,7 @@
 #include "coreaction.hh"
 #include "condexe.hh"
 #include "double.hh"
+#include "subflow.hh"
 
 /// \brief A stack equation
 struct StackEqn {
@@ -494,6 +495,121 @@ int4 ActionStackPtrFlow::apply(Funcdata &data)
   return 0;
 }
 
+/// \brief Examine the PcodeOps using the given Varnode to determine possible lane sizes
+///
+/// Run through the defining op and any descendant ops of the given Varnode, looking for
+/// CPUI_PIECE and CPUI_SUBPIECE. Use these to determine possible lane sizes and
+/// register them with the given LanedRegister object.
+/// \param vn is the given Varnode
+/// \param allowedLanes is used to determine if a putative lane size is allowed
+/// \param checkLanes collects the possible lane sizes
+void ActionLaneDivide::collectLaneSizes(Varnode *vn,const LanedRegister &allowedLanes,LanedRegister &checkLanes)
+
+{
+  list<PcodeOp *>::const_iterator iter = vn->beginDescend();
+  int4 step = 0;		// 0 = descendants, 1 = def, 2 = done
+  if (iter == vn->endDescend()) {
+    step = 1;
+  }
+  while(step < 2) {
+    int4 curSize;		// Putative lane size
+    if (step == 0) {
+      PcodeOp *op = *iter;
+      ++iter;
+      if (iter == vn->endDescend())
+	step = 1;
+      if (op->code() != CPUI_SUBPIECE) continue;	// Is the big register split into pieces
+      curSize = op->getOut()->getSize();
+    }
+    else {
+      step = 2;
+      if (!vn->isWritten()) continue;
+      PcodeOp *op = vn->getDef();
+      if (op->code() != CPUI_PIECE) continue;		// Is the big register formed from smaller pieces
+      curSize = op->getIn(0)->getSize();
+      int4 tmpSize = op->getIn(1)->getSize();
+      if (tmpSize < curSize)
+	curSize = tmpSize;
+    }
+    if (allowedLanes.allowedLane(curSize))
+      checkLanes.addLaneSize(curSize);			// Register this possible size
+  }
+}
+
+/// \brief Search for a likely lane size and try to divide a single Varnode into these lanes
+///
+/// There are different ways to search for a lane size:
+///
+/// Mode 0: Collect putative lane sizes based on the local ops using the Varnode. Attempt
+/// to divide based on each of those lane sizes in turn.
+///
+/// Mode 1: Similar to mode 0, except we allow for SUBPIECE operations that truncate to
+/// variables that are smaller than the lane size.
+///
+/// Mode 2: Attempt to divide based on a default lane size.
+/// \param data is the function being transformed
+/// \param vn is the given single Varnode
+/// \param lanedRegister is acceptable set of lane sizes for the Varnode
+/// \param mode is the lane size search mode (0, 1, or 2)
+/// \return \b true if the Varnode (and its data-flow) was successfully split
+bool ActionLaneDivide::processVarnode(Funcdata &data,Varnode *vn,const LanedRegister &lanedRegister,int4 mode)
+
+{
+  LanedRegister checkLanes;		// Lanes we are going to try, initialized to no lanes
+  bool allowDowncast = (mode > 0);
+  if (mode < 2)
+    collectLaneSizes(vn,lanedRegister,checkLanes);
+  else {
+    checkLanes.addLaneSize(4);		// Default lane size
+  }
+  LanedRegister::const_iterator enditer = checkLanes.end();
+  for(LanedRegister::const_iterator iter=checkLanes.begin();iter!=enditer;++iter) {
+    int4 curSize = *iter;
+    LaneDescription description(lanedRegister.getWholeSize(),curSize);	// Lane scheme dictated by curSize
+    LaneDivide laneDivide(&data,vn,description,allowDowncast);
+    if (laneDivide.doTrace()) {
+      laneDivide.apply();
+      count += 1;		// Indicate a change was made
+      return true;
+    }
+  }
+  return false;
+}
+
+int4 ActionLaneDivide::apply(Funcdata &data)
+
+{
+  map<VarnodeData,const LanedRegister *>::const_iterator iter;
+  for(int4 mode=0;mode<3;++mode) {
+    bool allStorageProcessed = true;
+    for(iter=data.beginLaneAccess();iter!=data.endLaneAccess();++iter) {
+      const LanedRegister *lanedReg = (*iter).second;
+      Address addr = (*iter).first.getAddr();
+      int4 sz = (*iter).first.size;
+      VarnodeLocSet::const_iterator viter = data.beginLoc(sz,addr);
+      VarnodeLocSet::const_iterator venditer = data.endLoc(sz,addr);
+      bool allVarnodesProcessed = true;
+      while(viter != venditer) {
+	Varnode *vn = *viter;
+	if (processVarnode(data, vn, *lanedReg, mode)) {
+	  viter = data.beginLoc(sz,addr);
+	  venditer = data.endLoc(sz, addr);	// Recalculate bounds
+	  allVarnodesProcessed = true;
+	}
+	else {
+	  ++viter;
+	  allVarnodesProcessed = false;
+	}
+      }
+      if (!allVarnodesProcessed)
+	allStorageProcessed = false;
+    }
+    if (allStorageProcessed) break;
+  }
+  data.clearLanedAccessMap();
+  return 0;
+}
+
 int4 ActionSegmentize::apply(Funcdata &data)
 
 {
@@ -818,14 +934,91 @@ int4 ActionShadowVar::apply(Funcdata &data)
   return 0;
 }
 
+/// \brief Make a limited search from a constant for a LOAD or STORE so we can see the AddrSpace being accessed
+///
+/// We traverse forward through the op reading the constant, through INT_ADD, INDIRECT, COPY, and MULTIEQUAL
+/// until we hit a LOAD or STORE.
+/// \param vn is the constant we are searching from
+/// \param op is the PcodeOp reading the constant
+/// \return the discovered AddrSpace or null
+AddrSpace *ActionConstantPtr::searchForLoadStore(Varnode *vn,PcodeOp *op)
+
+{
+  for(int4 i=0;i<3;++i) {
+    switch(op->code()) {
+      case CPUI_INT_ADD:
+      case CPUI_COPY:
+      case CPUI_INDIRECT:
+      case CPUI_MULTIEQUAL:
+	vn = op->getOut();
+	op = vn->loneDescend();
+	break;
+      case CPUI_LOAD:
+	return Address::getSpaceFromConst(op->getIn(0)->getAddr());
+      case CPUI_STORE:
+	if (op->getIn(1) == vn)
+	  return Address::getSpaceFromConst(op->getIn(0)->getAddr());
+	return (AddrSpace *)0;
+      default:
+	return (AddrSpace *)0;
+    }
+    if (op == (PcodeOp *)0) break;
+  }
+  for(list<PcodeOp *>::const_iterator iter=vn->beginDescend();iter!=vn->endDescend();++iter) {
+    op = *iter;
+    OpCode opc = op->code();
+    if (opc == CPUI_LOAD)
+      return Address::getSpaceFromConst(op->getIn(0)->getAddr());
+    else if (opc == CPUI_STORE && op->getIn(1) == vn)
+      return Address::getSpaceFromConst(op->getIn(0)->getAddr());
+  }
+  return (AddrSpace *)0;
+}
+
+/// \brief Select the AddrSpace in which we infer with the given constant is a pointer
+///
+/// The constant must match the AddrSpace address size. If there is more than one possible match,
+/// search for more information in the syntax tree.
+/// \param vn is the given constant Varnode
+/// \param op is the PcodeOp which uses the constant
+/// \param spaceList is the list of address spaces to select from
+/// \return the selected address space or null
+AddrSpace *ActionConstantPtr::selectInferSpace(Varnode *vn,PcodeOp *op,const vector<AddrSpace *> &spaceList)
+
+{
+  AddrSpace *resSpace = (AddrSpace *)0;
+  for(int4 i=0;i<spaceList.size();++i) {
+    AddrSpace *spc = spaceList[i];
+    int4 minSize = spc->getMinimumPtrSize();
+    if (minSize == 0) {
+      if (vn->getSize() != spc->getAddrSize())
+	continue;
+    }
+    else if (vn->getSize() < minSize)
+      continue;
+    if (resSpace != (AddrSpace *)0) {
+      AddrSpace *searchSpc = searchForLoadStore(vn,op);
+      if (searchSpc != (AddrSpace *)0)
+	resSpace = searchSpc;
+      break;
+    }
+    resSpace = spc;
+  }
+  return resSpace;
+}
+
 /// \brief Determine if given Varnode might be a pointer constant.
 ///
-/// If it is a pointer, return the symbol it points to, or NULL otherwise.
+/// If it is a pointer, return the symbol it points to, or NULL otherwise. If it is determined
+/// that the Varnode is a pointer to a specific symbol, the encoding of the full pointer is passed back.
+/// Usually this is just the constant value of the Varnode, but in this case of partial pointers
+/// (like \e near pointers) the full pointer may contain additional information.
 /// \param spc is the address space being pointed to
 /// \param vn is the given Varnode
 /// \param op is the lone descendant of the Varnode
 /// \param slot is the slot index of the Varnode
 /// \param rampoint will hold the Address of the resolved symbol
+/// \param fullEncoding will hold the full pointer encoding being passed back
 /// \param data is the function being analyzed
 /// \return the recovered symbol or NULL
 SymbolEntry *ActionConstantPtr::isPointer(AddrSpace *spc,Varnode *vn,PcodeOp *op,int4 slot,
@@ -881,7 +1074,7 @@ SymbolEntry *ActionConstantPtr::isPointer(AddrSpace *spc,Varnode *vn,PcodeOp *op
       return (SymbolEntry *)0;
     }
     // Make sure the constant is in the expected range for a pointer
-    if ((glb->pointer_lowerbound != 0)&&(glb->pointer_lowerbound > vn->getOffset()))
+    if (spc->getPointerLowerBound() > vn->getOffset())
       return (SymbolEntry *)0;
     // Check if the constant looks like a single bit or mask
     if (bit_transitions(vn->getOffset(),vn->getSize()) < 3)
@@ -912,13 +1105,8 @@ int4 ActionConstantPtr::apply(Funcdata &data)
   VarnodeLocSet::const_iterator begiter,enditer;
   Architecture *glb = data.getArch();
   AddrSpace *cspc = glb->getConstantSpace();
-  AddrSpace *rspc = glb->getDefaultSpace();
   SymbolEntry *entry;
   Varnode *vn;
-  bool arenearpointers = glb->hasNearPointers(rspc);
-  int4 minsize = rspc->isTruncated() ? rspc->getAddrSize() : 0;
-  if (minsize > 0)
-    arenearpointers = true;
 
   begiter = data.beginLoc(cspc);
   enditer = data.endLoc(cspc);
@@ -934,12 +1122,8 @@ int4 ActionConstantPtr::apply(Funcdata &data)
 
     PcodeOp *op = vn->loneDescend();
     if (op == (PcodeOp *)0) continue;
-    if (arenearpointers) {
-      if (vn->getSize() < minsize) continue;
-    }
-    else {
-      if (vn->getSize() != rspc->getAddrSize()) continue;
-    }
+    AddrSpace *rspc = selectInferSpace(vn, op, glb->inferPtrSpaces);
+    if (rspc == (AddrSpace *)0) continue;
     int4 slot = op->getSlot(vn);
     OpCode opc = op->code();
     if (opc == CPUI_INT_ADD) {
@@ -1025,14 +1209,30 @@ int4 ActionDeindirect::apply(Funcdata &data)
   return 0;
 }
 
+/// Check if the given Varnode has a matching LanedRegister record. If so, add its
+/// storage location to the given function's laned access list.
+/// \param data is the given function
+/// \param vn is the given Varnode
+void ActionVarnodeProps::markLanedVarnode(Funcdata &data,Varnode *vn)
+
+{
+  if (vn->isConstant()) return;
+  Architecture *glb = data.getArch();
+  const LanedRegister *lanedRegister  = glb->getLanedRegister(vn->getAddr(),vn->getSize());
+  if (lanedRegister != (const LanedRegister *)0)
+    data.markLanedVarnode(vn,lanedRegister);
+}
+
 int4 ActionVarnodeProps::apply(Funcdata &data)
 
 {
   Architecture *glb = data.getArch();
   bool cachereadonly = glb->readonlypropagate;
-  if (glb->userops.getVolatileRead() == (VolatileReadOp *)0) {
-    if (!cachereadonly)
-      return 0;			// Nothing to do to special properties
+  int4 minLanedSize = 1000000;		// Default size meant to filter no Varnodes
+  if (!data.isLanedRegComplete()) {
+    int4 sz = glb->getMinimumLanedRegisterSize();
+    if (sz > 0)
+      minLanedSize = sz;
   }
   VarnodeLocSet::const_iterator iter;
   Varnode *vn;
@@ -1041,6 +1241,9 @@ int4 ActionVarnodeProps::apply(Funcdata &data)
   while(iter != data.endLoc()) {
     vn = *iter++;		// Advance iterator in case vn is deleted
     if (vn->isAnnotation()) continue;
+    int4 vnSize = vn->getSize();
+    if (vnSize >= minLanedSize)
+      markLanedVarnode(data, vn);
     if (vn->hasActionProperty()) {
       if (cachereadonly&&vn->isReadOnly()) {
 	if (data.fillinReadOnly(vn)) // Try to replace vn with its lookup in LoadImage
@@ -1050,7 +1253,7 @@ int4 ActionVarnodeProps::apply(Funcdata &data)
 	if (data.replaceVolatile(vn))
 	  count += 1;		// Try to replace vn with pcode op
     }
-    else if (((vn->getNZMask() & vn->getConsume())==0)&&(vn->getSize()<=sizeof(uintb))) {
+    else if (((vn->getNZMask() & vn->getConsume())==0)&&(vnSize<=sizeof(uintb))) {
       // FIXME: uintb should be arbitrary precision
       if (vn->isConstant()) continue; // Don't replace a constant
       if (vn->isWritten()) {
@@ -1070,6 +1273,7 @@ int4 ActionVarnodeProps::apply(Funcdata &data)
       }
     }
   }
+  data.setLanedRegGenerated();
   return 0;
 }
 
@@ -1860,8 +2064,11 @@ int4 ActionLikelyTrash::apply(Funcdata &data)
 
     for(uint4 i=0;i<indlist.size();++i) {
       PcodeOp *op = indlist[i];
-      if (op->code() == CPUI_INDIRECT)
-	data.truncateIndirect(indlist[i]);
+      if (op->code() == CPUI_INDIRECT) {
+	// Trucate data-flow through INDIRECT, turning it into indirect creation
+	data.opSetInput(op,data.newConstant(op->getOut()->getSize(), 0),0);
+	data.markIndirectCreation(op,false);
+      }
       else if (op->code() == CPUI_INT_AND) {
 	data.opSetInput(op,data.newConstant(op->getIn(1)->getSize(),0),1);
       }
@@ -2125,23 +2332,6 @@ void ActionNameVars::lookForBadJumpTables(Funcdata &data)
   }
 }
 
-/// From among the \e name \e recommendations (symbol information that wasn't locked)
-/// find current symbols for which the name can still apply and apply it.
-/// \param data is the function being analyzed
-void ActionNameVars::lookForRecommendedNames(Funcdata &data)
-
-{
-  ScopeLocal *localmap = data.getScopeLocal();
-  vector<string> names;
-  vector<Symbol *> symbols;
-
-  localmap->makeNameRecommendationsForSymbols(names,symbols);
-  for(uint4 i=0;i<names.size();++i) {
-    Symbol *sym = symbols[i];
-    sym->getScope()->renameSymbol(sym,localmap->makeNameUnique(names[i]));
-  }
-}
-
 /// \brief Add a recommendation to the database based on a particular sub-function parameter.
 ///
 /// We know \b vn holds data-flow for parameter \b param,  try to attach its name to \b vn's symbol.
@@ -2168,6 +2358,7 @@ void ActionNameVars::makeRec(ProtoParameter *param,Varnode *vn,map<HighVariable 
   }
   HighVariable *high = vn->getHigh();
   if (!high->isMark()) return;	// Not one of the variables needing a name
+  if (high->isAddrTied()) return;	// Don't propagate parameter name to address tied variable
 
   map<HighVariable *,OpRecommend>::iterator iter = recmap.find(high);
   if (iter != recmap.end()) {	// We have seen this varnode before
@@ -2243,33 +2434,73 @@ void ActionNameVars::lookForFuncParamNames(Funcdata &data,const vector<Varnode *
   }
 }
 
-int4 ActionNameVars::apply(Funcdata &data)
+/// \brief Link symbols associated with a given \e spacebase Varnode
+///
+/// Look for PTRSUB ops which indicate a symbol reference within the address space
+/// referred to by the \e spacebase Varnode.  Decode any symbol reference and link it
+/// to the appropriate HighVariable
+/// \param vn is the given \e spacebase Varnode
+/// \param data is the function containing the Varnode
+/// \param namerec is used to store any recovered Symbol without a name
+void ActionNameVars::linkSpacebaseSymbol(Varnode *vn,Funcdata &data,vector<Varnode *> &namerec)
+
+{
+  if (!vn->isConstant() && !vn->isInput()) return;
+  list<PcodeOp *>::const_iterator iter;
+  for(iter=vn->beginDescend();iter!=vn->endDescend();++iter) {
+    PcodeOp *op = *iter;
+    if (op->code() != CPUI_PTRSUB) continue;
+    Varnode *offVn = op->getIn(1);
+    Symbol *sym = data.linkSymbolReference(offVn);
+    if ((sym != (Symbol *)0) && sym->isNameUndefined())
+      namerec.push_back(offVn);
+  }
+}
+
+/// \brief Link formal Symbols to their HighVariable representative in the given Function
+///
+/// Run through all HighVariables for the given function and set up the explicit mapping with
+/// existing Symbol objects.  If there is no matching Symbol for a given HighVariable, a new
+/// Symbol is created. Any Symbol that does not have a name is added to a list for further
+/// name resolution.
+/// \param data is the given function
+/// \param namerec is the container for collecting Symbols with a name
+void ActionNameVars::linkSymbols(Funcdata &data,vector<Varnode *> &namerec)
 
 {
   const AddrSpaceManager *manage = data.getArch();
   VarnodeLocSet::const_iterator iter,enditer;
   AddrSpace *spc;
-  vector<Varnode *> namerec;	// Name representatives of symbols that need names
+  AddrSpace *constSpace = manage->getConstantSpace();
+  enditer = data.endLoc(constSpace);
+  for(iter=data.beginLoc(constSpace);iter!=enditer;++iter) {
+    Varnode *curvn = *iter;
+    if (curvn->getSymbolEntry() != (SymbolEntry *)0)
+      data.linkSymbol(curvn);		// Special equate symbol
+    else if (curvn->isSpacebase())
+      linkSpacebaseSymbol(curvn, data, namerec);
+  }
 
   for(int4 i=0;i<manage->numSpaces();++i) { // Build a list of nameable highs
     spc = manage->getSpace(i);
     if (spc == (AddrSpace *)0) continue;
+    if (spc == constSpace) continue;
     enditer = data.endLoc(spc);
     for(iter=data.beginLoc(spc);iter!=enditer;++iter) {
       Varnode *curvn = *iter;
       if (curvn->isFree()) {
-	if (curvn->getSymbolEntry() != (SymbolEntry *)0)
-	  data.linkSymbol(curvn);		// Special equate symbol
 	continue;
       }
+      if (curvn->isSpacebase())
+	linkSpacebaseSymbol(curvn, data, namerec);
       Varnode *vn = curvn->getHigh()->getNameRepresentative();
       if (vn != curvn) continue; // Hit each high only once
       HighVariable *high = vn->getHigh();
       if (!high->hasName()) continue;
       Symbol *sym = data.linkSymbol(vn);
       if (sym != (Symbol *)0) {	// Can we associate high with a nameable symbol
-	if (sym->isNameUndefined())
-	  namerec.push_back(vn);
+	if (sym->isNameUndefined() && high->getSymbolOffset() < 0)
+	  namerec.push_back(vn);	// Add if no name, and we have a high representing the whole
 	if (sym->isSizeTypeLocked()) {
 	  if (vn->getSize() == sym->getType()->getSize())
 	    sym->getScope()->overrideSizeLockType(sym,high->getType());
@@ -2277,34 +2508,29 @@ int4 ActionNameVars::apply(Funcdata &data)
       }
     }
   }
+}
 
-  lookForRecommendedNames(data); // Make sure recommended names hit before subfunc
+int4 ActionNameVars::apply(Funcdata &data)
+
+{
+  vector<Varnode *> namerec;
+
+  linkSymbols(data, namerec);
+  data.getScopeLocal()->recoverNameRecommendationsForSymbols(); // Make sure recommended names hit before subfunc
   lookForBadJumpTables(data);
   lookForFuncParamNames(data,namerec);
 
-  ScopeLocal *localmap = data.getScopeLocal();
   int4 base = 1;
   for(uint4 i=0;i<namerec.size();++i) {
     Varnode *vn = namerec[i];
-    HighVariable *high = vn->getHigh();
-    Symbol *sym = high->getSymbol();
+    Symbol *sym = vn->getHigh()->getSymbol();
     if (sym->isNameUndefined()) {
-      string newname;
-      Address usepoint;
-      if (!vn->isAddrTied())
-	usepoint = vn->getUsePoint(data);
-      if (high->isInput()) {
-	int4 index = -1;
-	if (sym->getCategory()==0)
-	  index = sym->getCategory()+1;
-	newname = localmap->buildVariableName(vn->getAddr(),usepoint,high->getType(),index,vn->getFlags());
-      }
-      else
-	newname = localmap->buildVariableName(vn->getAddr(),usepoint,high->getType(),base,vn->getFlags());
-
-      sym->getScope()->renameSymbol(sym,newname);
+      Scope *scope = sym->getScope();
+      string newname = scope->buildDefaultName(sym, base, vn);
+      scope->renameSymbol(sym,newname);
     }
   }
+  data.getScopeLocal()->assignDefaultNames(base);
   return 0;
 }
 
@@ -3428,7 +3654,7 @@ int4 ActionPrototypeTypes::apply(Funcdata &data)
   else
     data.initActiveOutput(); // Initiate gathering potential return values
 
-  AddrSpace *spc = data.getArch()->getDefaultSpace();
+  AddrSpace *spc = data.getArch()->getDefaultCodeSpace();
   if (spc->isTruncated()) {
     // For truncated spaces we need a zext op, from the truncated stack pointer
     // into the full stack pointer
@@ -3645,67 +3871,15 @@ int4 ActionDynamicSymbols::apply(Funcdata &data)
 
 {
   ScopeLocal *localmap = data.getScopeLocal();
-  list<SymbolEntry>::const_iterator iter,enditer;
+  list<SymbolEntry>::iterator iter,enditer;
   iter = localmap->beginDynamic();
   enditer = localmap->endDynamic();
   DynamicHash dhash;
   while(iter != enditer) {
-    const SymbolEntry &entry( *iter );
+    SymbolEntry *entry = &(*iter);
     ++iter;
-    Symbol *sym = entry.getSymbol();
-    dhash.clear();
-    Varnode *vn = dhash.findVarnode(&data,entry.getFirstUseAddress(),entry.getHash());
-    if (vn == (Varnode *)0) {
-      //      localmap->removeSymbol(sym); // If it didn't map to anything, remove it
-      continue;
-    }
-    if (vn->getSymbolEntry() == &entry) continue; // Already applied it
-    if (vn->getSize() != entry.getSize()) {
-      ostringstream s;
-      s << "Unable to use symbol ";
-      if (!sym->isNameUndefined())
-	s << sym->getName() << ' ';
-      s << ": Size does not match variable it labels";
-      data.warningHeader(s.str());
-      //      localmap->removeSymbol(sym); // Don't use the symbol
-      continue;
-    }
-    if (vn->getSymbolEntry() == &entry) continue; // Already applied it
-
-    if (vn->isImplied()) {	// This should be finding an explicit, but a cast may have been inserted
-      Varnode *newvn = (Varnode *)0;
-      // Look at the "other side" of the cast
-      if (vn->isWritten() && (vn->getDef()->code() == CPUI_CAST))
-	newvn = vn->getDef()->getIn(0);
-      else {
-	PcodeOp *castop = vn->loneDescend();
-	if ((castop != (PcodeOp *)0)&&(castop->code() == CPUI_CAST))
-	  newvn = castop->getOut();
-      }
-      // See if the varnode on the other side is explicit
-      if ((newvn != (Varnode *)0)&&(newvn->isExplicit()))
-	vn = newvn;		// in which case we use it
-    }
-
-    int4 offset;
-    if (!entry.isPiece())
-      offset = -1;
-    else
-      offset = entry.getOffset();
-    vn->getHigh()->setSymbol(sym,offset);
-    if (!sym->isTypeLocked()) {	// If the dynamic symbol did not lock its type
-      localmap->retypeSymbol(sym,vn->getType()); // use the type propagated into the varnode
-    }
-    else if (sym->getType() != vn->getType()) {
-      ostringstream s;
-      s << "Unable to use type for symbol " << sym->getName();
-      data.warningHeader(s.str());
-      localmap->retypeSymbol(sym,vn->getType()); // use the type propagated into the varnode
-    }
-    // FIXME: Setting the symbol here (for the first time) gives the type no time to propagate properly
-    // Currently the casts aren't set properly
-
-    count += 1;
+    if (data.attemptDynamicMappingLate(entry, dhash))
+      count += 1;
   }
   return 0;
 }
@@ -4045,7 +4219,7 @@ bool ActionInferTypes::propagateTypeEdge(TypeFactory *typegrp,PcodeOp *op,int4 i
   case CPUI_INT_OR:
   case CPUI_INT_XOR:
     if (invn->isSpacebase()) {
-      AddrSpace *spc = typegrp->getArch()->getDefaultSpace();
+      AddrSpace *spc = typegrp->getArch()->getDefaultDataSpace();
       newtype = typegrp->getTypePointer(alttype->getSize(),typegrp->getBase(1,TYPE_UNKNOWN),spc->getWordSize());
     }
     else
@@ -4061,7 +4235,7 @@ bool ActionInferTypes::propagateTypeEdge(TypeFactory *typegrp,PcodeOp *op,int4 i
     break;
   case CPUI_SEGMENTOP:
     {
-      AddrSpace *spc = typegrp->getArch()->getDefaultSpace();
+      AddrSpace *spc = typegrp->getArch()->getDefaultDataSpace();
       Datatype *btype = ((TypePointer *)alttype)->getPtrTo();
       newtype = typegrp->getTypePointer(outvn->getSize(),btype,spc->getWordSize());
     }
@@ -4602,6 +4776,7 @@ void universal_action(Architecture *conf)
 	actprop->addRule( new RuleFloatRange("analysis") );
 	actprop->addRule( new RulePiece2Zext("analysis") );
 	actprop->addRule( new RulePiece2Sext("analysis") );
+	actprop->addRule( new RulePopcountBoolXor("analysis") );
 	actprop->addRule( new RuleSubvarAnd("subvar") );
 	actprop->addRule( new RuleSubvarSubpiece("subvar") );
 	actprop->addRule( new RuleSplitFlow("subvar") );
@@ -4628,6 +4803,7 @@ void universal_action(Architecture *conf)
 	conf->extra_pool_rules.clear(); // Rules are now absorbed into universal
       }
       actstackstall->addAction( actprop );
+      actstackstall->addAction( new ActionLaneDivide("base") );
       actstackstall->addAction( new ActionMultiCse("analysis") );
       actstackstall->addAction( new ActionShadowVar("analysis") );
       actstackstall->addAction( new ActionDeindirect("deindirect") );
@@ -4684,8 +4860,10 @@ void universal_action(Architecture *conf)
   act->addAction( new ActionMergeRequired("merge") );
   act->addAction( new ActionMarkExplicit("merge") );
   act->addAction( new ActionMarkImplied("merge") ); // This must come BEFORE general merging
+  act->addAction( new ActionMergeMultiEntry("merge") );
   act->addAction( new ActionMergeCopy("merge") );
   act->addAction( new ActionDominantCopy("merge") );
+  act->addAction( new ActionDynamicSymbols("dynamic") );
   act->addAction( new ActionMarkIndirectOnly("merge") ); // Must come after required merges but before speculative
   act->addAction( new ActionMergeAdjacent("merge") );
   act->addAction( new ActionMergeType("merge") );

@@ -39,7 +39,7 @@ public abstract class DemangledObject {
 	protected static final String SPACE = " ";
 	protected static final Pattern SPACE_PATTERN = Pattern.compile(SPACE);
 
-	protected static final String NAMESPACE_SEPARATOR = Namespace.NAMESPACE_DELIMITER;
+	protected static final String NAMESPACE_SEPARATOR = Namespace.DELIMITER;
 	protected static final String EMPTY_STRING = "";
 
 	protected String originalMangled;
@@ -113,6 +113,14 @@ public abstract class DemangledObject {
 	 */
 	public String getDemangledName() {
 		return demangledName;
+	}
+
+	/**
+	 * Returns the original mangled name
+	 * @return the name
+	 */
+	public String getMangledName() {
+		return originalMangled;
 	}
 
 	/** 
@@ -495,8 +503,11 @@ public abstract class DemangledObject {
 
 			List<Symbol> symbols = symbolTable.getSymbols(namespaceName, namespace);
 			Symbol namespaceSymbol =
-				symbols.stream().filter(s -> (s.getSymbolType() == SymbolType.NAMESPACE ||
-					s.getSymbolType() == SymbolType.CLASS)).findFirst().orElse(null);
+				symbols.stream()
+						.filter(s -> (s.getSymbolType() == SymbolType.NAMESPACE ||
+							s.getSymbolType() == SymbolType.CLASS))
+						.findFirst()
+						.orElse(null);
 			if (namespaceSymbol == null) {
 				try {
 					namespace =

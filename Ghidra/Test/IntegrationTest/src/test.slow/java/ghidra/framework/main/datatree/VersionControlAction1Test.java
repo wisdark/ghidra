@@ -32,7 +32,9 @@ import docking.DialogComponentProvider;
 import docking.action.DockingActionIf;
 import docking.widgets.table.*;
 import docking.widgets.tree.GTreeNode;
-import ghidra.framework.model.*;
+import ghidra.framework.model.DomainFile;
+import ghidra.framework.model.DomainFolder;
+import ghidra.framework.plugintool.PluginTool;
 import ghidra.framework.store.ItemCheckoutStatus;
 import ghidra.framework.store.Version;
 import ghidra.program.model.listing.Program;
@@ -337,7 +339,7 @@ public class VersionControlAction1Test extends AbstractVersionControlActionTest 
 
 		waitForSwing();
 
-		List<Tool> tools = frontEnd.getTools();
+		List<PluginTool> tools = frontEnd.getTools();
 		assertEquals(1, tools.size());
 
 		DomainFile[] dfs = tools.get(0).getDomainFiles();
@@ -408,7 +410,7 @@ public class VersionControlAction1Test extends AbstractVersionControlActionTest 
 
 		waitForSwing();
 
-		List<Tool> tools = frontEnd.getTools();
+		List<PluginTool> tools = frontEnd.getTools();
 		assertEquals(1, tools.size());
 
 		DomainFile[] dfs = tools.get(0).getDomainFiles();
@@ -485,7 +487,7 @@ public class VersionControlAction1Test extends AbstractVersionControlActionTest 
 
 		waitForSwing();
 
-		List<Tool> tools = frontEnd.getTools();
+		List<PluginTool> tools = frontEnd.getTools();
 		assertEquals(1, tools.size());
 
 		DomainFile[] dfs = tools.get(0).getDomainFiles();
@@ -608,8 +610,9 @@ public class VersionControlAction1Test extends AbstractVersionControlActionTest 
 		selectInTable(table, node);
 
 		DockingActionIf undoCheckoutAction = getAction("UndoCheckOut");
-		assertTrue(undoCheckoutAction.isEnabledForContext(dialog.getActionContext(null)));
-		performAction(undoCheckoutAction);
+		ActionContext actionContext = dialog.getActionContext(null);
+		assertTrue(undoCheckoutAction.isEnabledForContext(actionContext));
+		performAction(undoCheckoutAction, actionContext, true);
 
 		waitForBusyTable(table);
 		assertEquals(1, model.getRowCount());
