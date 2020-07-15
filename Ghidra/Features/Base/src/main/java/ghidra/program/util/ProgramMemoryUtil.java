@@ -225,7 +225,7 @@ public class ProgramMemoryUtil {
 		AddressSet addrSet = new AddressSet();
 		MemoryBlock[] memBlocks = program.getMemory().getBlocks();
 		for (MemoryBlock memoryBlock : memBlocks) {
-			if (memoryBlock.getType() == MemoryBlockType.OVERLAY) {
+			if (memoryBlock.isOverlay()) {
 				AddressRange addressRange =
 					new AddressRangeImpl(memoryBlock.getStart(), memoryBlock.getEnd());
 				addrSet.add(addressRange);
@@ -521,15 +521,8 @@ public class ProgramMemoryUtil {
 
 		int addrSize = toAddress.getSize();
 
-		DataConverter dataConverter;
+		DataConverter dataConverter = DataConverter.getInstance(memory.isBigEndian());
 		byte[] addressBytes = new byte[addrSize / 8];
-
-		if (isBigEndian) {
-			dataConverter = new BigEndianDataConverter();
-		}
-		else {
-			dataConverter = new LittleEndianDataConverter();
-		}
 
 		if (toAddress instanceof SegmentedAddress) {
 			// Only search for offset (exclude segment)

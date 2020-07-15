@@ -20,7 +20,7 @@ import ghidra.program.model.data.DataType;
 /**
  * <code>WrappedDataType</code> provide the ability to wrap 
  * a {@link DataType} with additional information not conveyed
- * by the datatype on its' own. 
+ * by the datatype on its own. 
  * <P>
  * Note that a BitFieldDataType instance may be specified as the datatype
  * in order to convey bitfield related information.
@@ -57,6 +57,11 @@ public class WrappedDataType {
 	 * @return true if datatype corresponds to a zero-length array 
 	 * which can not directly be represented as an Array datatype, 
 	 * else false for all other cases.
+	 * 
+	 * NOTE: zero-length arrays are only supported as a trailing flex-array
+	 * within a structure.  If such zer-length arrays exist within unions or
+	 * within the body of a structure the composite reconstruction will produce
+	 * unpredictable results or fail.
 	 */
 	public boolean isZeroLengthArray() {
 		return isZeroLengthArray;

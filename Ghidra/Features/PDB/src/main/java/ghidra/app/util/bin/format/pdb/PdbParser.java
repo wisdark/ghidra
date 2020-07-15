@@ -294,7 +294,7 @@ public class PdbParser {
 
 		// Ensure that all data types are resolved
 		if (dataTypeParser != null) {
-			dataTypeParser.flushDataTypeCache(monitor);
+			dataTypeParser.flushDataTypeCache();
 		}
 	}
 
@@ -1349,10 +1349,6 @@ public class PdbParser {
 
 	DataType getCachedDataType(String name) {
 		return getDataTypeParser().getCachedDataType(name);
-	}
-
-	void addDataType(DataType dataType) {
-		getDataTypeParser().addDataType(dataType);
 	}
 
 	WrappedDataType findDataType(String dataTypeName) throws CancelledException {

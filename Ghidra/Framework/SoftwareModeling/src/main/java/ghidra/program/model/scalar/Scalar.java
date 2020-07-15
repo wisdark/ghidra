@@ -99,7 +99,10 @@ public class Scalar implements Comparable<Scalar> {
 	 * Get the value as unsigned.
 	 */
 	public long getUnsignedValue() {
-		return value;
+		if (value == 0) {  // just in case the bitLength is 0
+			return 0;
+		}
+		return (value & BITMASKS[bitLength]);
 	}
 
 	/**
@@ -116,7 +119,7 @@ public class Scalar implements Comparable<Scalar> {
 	public BigInteger getBigInteger() {
 		int signum = (signed && testBit(bitLength - 1)) ? -1 : 1;
 
-		// Get magnitide
+		// Get magnitude
 		int numBytes = ((bitLength - 1) / 8) + 1;
 		long tmpVal = getValue();
 		if (signed && tmpVal < 0) {
