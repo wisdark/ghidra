@@ -726,6 +726,16 @@ class ElfProgramBuilder extends MemorySectionResolver implements ElfLoadHelper {
 		ElfSymbol[] symbols = relocationTable.getAssociatedSymbolTable().getSymbols();
 		ElfRelocation[] relocs = relocationTable.getRelocations();
 
+		boolean relrTypeUnknown = false;
+		long relrRelocationType = 0;
+		if (relocationTable.isRelrTable() && context != null) {
+			relrRelocationType = context.getRelrRelocationType();
+			if (relrRelocationType == 0) {
+				relrTypeUnknown = true;
+				log("Failed to process RELR relocations - extension does not define RELR type");
+			}
+		}
+
 		for (ElfRelocation reloc : relocs) {
 
 			monitor.checkCanceled();
@@ -746,6 +756,12 @@ class ElfProgramBuilder extends MemorySectionResolver implements ElfLoadHelper {
 
 			byte[] bytes = elf.is64Bit() ? new byte[8] : new byte[4];
 
+			long type = reloc.getType();
+			if (relrRelocationType != 0) {
+				type = relrRelocationType;
+				reloc.setType(relrRelocationType);
+			}
+
 			try {
 				MemoryBlock relocBlock = memory.getBlock(relocAddr);
 				if (relocBlock == null) {
@@ -758,7 +774,7 @@ class ElfProgramBuilder extends MemorySectionResolver implements ElfLoadHelper {
 					catch (Exception e) {
 						Msg.error(this, "Unexpected Exception", e);
 						ElfRelocationHandler.markAsUninitializedMemory(program, relocAddr,
-							reloc.getType(), reloc.getSymbolIndex(), symbolName, log);
+							type, reloc.getSymbolIndex(), symbolName, log);
 						continue;
 					}
 				}
@@ -766,11 +782,15 @@ class ElfProgramBuilder extends MemorySectionResolver implements ElfLoadHelper {
 				memory.getBytes(relocAddr, bytes);
 
 				if (context != null && context.hasRelocationHandler()) {
-					context.processRelocation(reloc, relocAddr);
+					if (relrTypeUnknown) {
+						ElfRelocationHandler.markAsUnsupportedRelr(program, relocAddr);
+					}
+					else {
+						context.processRelocation(reloc, relocAddr);
+					}
 				}
 			}
 			catch (MemoryAccessException e) {
-				long type = reloc.getType();
 				if (type != 0) { // ignore if type 0 which is always NONE (no relocation performed)
 					log("Unable to perform relocation: Type = " + type + " (0x" +
 						Long.toHexString(type) + ") at " + relocAddr + " (Symbol = " + symbolName +
@@ -956,7 +976,14 @@ class ElfProgramBuilder extends MemorySectionResolver implements ElfLoadHelper {
 	private void markupRelocationTable(Address relocTableAddr, ElfRelocationTable relocTable,
 			TaskMonitor monitor) {
 		try {
-			listing.createData(relocTableAddr, relocTable.toDataType());
+			DataType dataType = relocTable.toDataType();
+			if (dataType != null) {
+				listing.createData(relocTableAddr, dataType);
+			}
+			else {
+				listing.setComment(relocTableAddr, CodeUnit.PRE_COMMENT,
+					"ELF Relocation Table (markup not yet supported)");
+			}
 		}
 		catch (Exception e) {
 			log("Failed to properly markup relocation table: " + getMessage(e));
@@ -1133,8 +1160,8 @@ class ElfProgramBuilder extends MemorySectionResolver implements ElfLoadHelper {
 	}
 
 	/**
-	 * Create EXTERNAL memory block based upon start of {@link #freeAddressRange} and the
-	 * current {@link #nextFreeAddress}.
+	 * Create EXTERNAL memory block based upon {@link #externalBlockLimits} and
+	 * {@link #lastExternalBlockEntryAddress}.
 	 */
 	private void createExternalBlock() {
 		if (lastExternalBlockEntryAddress == null) {
@@ -1144,7 +1171,8 @@ class ElfProgramBuilder extends MemorySectionResolver implements ElfLoadHelper {
 		long size = lastExternalBlockEntryAddress.subtract(externalBlockAddress) + 1;
 		try {
 			MemoryBlock block =
-				memory.createUninitializedBlock("EXTERNAL", externalBlockAddress, size, false);
+				memory.createUninitializedBlock(MemoryBlock.EXTERNAL_BLOCK_NAME,
+					externalBlockAddress, size, false);
 
 			// assume any value in external is writable.
 			block.setWrite(true);
@@ -1271,6 +1299,8 @@ class ElfProgramBuilder extends MemorySectionResolver implements ElfLoadHelper {
 			return null;
 		}
 
+		ElfLoadAdapter loadAdapter = elf.getLoadAdapter();
+
 		ElfSectionHeader[] elfSections = elf.getSections();
 		short sectionIndex = elfSymbol.getSectionHeaderIndex();
 		Address symSectionBase = null;
@@ -1292,11 +1322,13 @@ class ElfProgramBuilder extends MemorySectionResolver implements ElfLoadHelper {
 				}
 				symbolSpace = symSectionBase.getAddressSpace();
 			} // else assume sections have been stripped
-			if (symbolSpace.getPhysicalSpace() == defaultSpace) {
+			AddressSpace space = symbolSpace.getPhysicalSpace();
+			symOffset = loadAdapter.getAdjustedMemoryOffset(symOffset, space);
+			if (space == defaultSpace) {
 				symOffset =
 					elf.adjustAddressForPrelink(symOffset) + getImageBaseWordAdjustmentOffset();
 			}
-			else if (symbolSpace.getPhysicalSpace() == defaultDataSpace) {
+			else if (space == defaultDataSpace) {
 				symOffset += getImageDataBase();
 			}
 		}
@@ -1304,6 +1336,7 @@ class ElfProgramBuilder extends MemorySectionResolver implements ElfLoadHelper {
 			// FIXME: No sections defined or refers to external symbol
 			// Uncertain what if any offset adjustments should apply, although the
 			// EXTERNAL block is affected by the program image base
+			symOffset = loadAdapter.getAdjustedMemoryOffset(symOffset, defaultSpace);
 			symOffset += getImageBaseWordAdjustmentOffset();
 		}
 		else if (sectionIndex == ElfSectionHeaderConstants.SHN_ABS) { // Absolute value/address - 0xfff1
@@ -1311,6 +1344,10 @@ class ElfProgramBuilder extends MemorySectionResolver implements ElfLoadHelper {
 			// The should potentially be assign a constant address instead (not possible currently)
 
 			// Note: Assume data space - symbols will be "pinned"
+
+			// TODO: it may be inappropriate to adjust since value may not actually be a memory address - what to do?
+			// symOffset = loadAdapter.adjustMemoryOffset(symOffset, space);
+
 			symbolSpace = getDefaultDataSpace();
 		}
 		else if (sectionIndex == ElfSectionHeaderConstants.SHN_COMMON) { // Common symbols - 0xfff2 (

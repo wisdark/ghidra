@@ -279,13 +279,15 @@ public class GTable extends JTable {
 	 * Call this when the table will no longer be used
 	 */
 	public void dispose() {
-		if (dataModel instanceof AbstractGTableModel) {
-			((AbstractGTableModel<?>) dataModel).dispose();
+		TableModel unwrappedeModel = getUnwrappedTableModel();
+		if (unwrappedeModel instanceof AbstractGTableModel) {
+			((AbstractGTableModel<?>) unwrappedeModel).dispose();
 		}
 
 		if (columnModel instanceof GTableColumnModel) {
 			((GTableColumnModel) columnModel).dispose();
 		}
+		columnRenderingDataMap.clear();
 	}
 
 	/**
@@ -488,6 +490,10 @@ public class GTable extends JTable {
 	private int calculatePreferredRowHeight() {
 		if (userDefinedRowHeight != 16) { // default size
 			return userDefinedRowHeight; // prefer user-defined settings
+		}
+
+		if (getColumnCount() == 0) {
+			return userDefinedRowHeight; // no columns yet defined
 		}
 
 		TableCellRenderer defaultRenderer = getDefaultRenderer(String.class);
@@ -1012,15 +1018,16 @@ public class GTable extends JTable {
 		return updated;
 	}
 
-	private Object getCellValue(int row, int column) {
+	private Object getCellValue(int row, int viewColumn) {
 		RowObjectTableModel<Object> rowModel = getRowObjectTableModel();
 		if (rowModel == null) {
-			Object value = super.getValueAt(row, column);
+			Object value = super.getValueAt(row, viewColumn);
 			return maybeConvertValue(value);
 		}
 
 		Object rowObject = rowModel.getRowObject(row);
-		String stringValue = TableUtils.getTableCellStringValue(rowModel, rowObject, column);
+		int modelColumn = convertColumnIndexToModel(viewColumn);
+		String stringValue = TableUtils.getTableCellStringValue(rowModel, rowObject, modelColumn);
 		return maybeConvertValue(stringValue);
 	}
 
@@ -1221,8 +1228,7 @@ public class GTable extends JTable {
 		GTableToCSV.writeCSVUsingColunns(file, GTable.this, columnList);
 	}
 
-	public static void createSharedActions(Tool tool, ToolActions toolActions,
-			String owner) {
+	public static void createSharedActions(Tool tool, ToolActions toolActions, String owner) {
 
 		String actionMenuGroup = "zzzTableGroup";
 		tool.setMenuGroup(new String[] { "Copy" }, actionMenuGroup, "1");

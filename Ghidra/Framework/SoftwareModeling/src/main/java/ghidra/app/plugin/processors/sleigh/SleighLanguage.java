@@ -662,7 +662,8 @@ public class SleighLanguage implements Language {
 		XmlElement element = parser.start("processor_spec");
 		while (!parser.peek().isEnd()) {
 			element = parser.start("properties", "segmented_address", "segmentop", "programcounter",
-				"data_space", "context_data", "volatile", "jumpassist", "incidentalcopy",
+				"data_space", "inferptrbounds", "context_data", "volatile", "jumpassist",
+				"incidentalcopy",
 				"register_data", "default_symbols", "default_memory_blocks");
 			if (element.getName().equals("properties")) {
 				while (!parser.peek().isEnd()) {
@@ -827,6 +828,11 @@ public class SleighLanguage implements Language {
 					parser.discardSubTree();
 				}
 			}
+			else if (element.getName().equals("inferptrbounds")) {
+				while (parser.peek().isStart()) {
+					parser.discardSubTree();
+				}
+			}
 			else if (element.getName().equals("segmentop")) {
 				InjectPayloadSleigh payload = parseSegmentOp(element, parser);
 				addAdditionInject(payload);
@@ -882,11 +888,13 @@ public class SleighLanguage implements Language {
 			throw new SleighException(".sla file for " + getLanguageID() + " has the wrong format");
 		}
 		boolean isBigEndian = SpecXmlUtils.decodeBoolean(el.getAttribute("bigendian"));
-		// check the instruction endianess, not the program data endianess
-		if (isBigEndian ^ description.getInstructionEndian().isBigEndian()) {
-			throw new SleighException(
-				".ldefs says " + getLanguageID() + " is " + description.getInstructionEndian() +
-					" but .sla says " + el.getAttribute("bigendian"));
+		if (isBigEndian ^ description.getEndian().isBigEndian()) {
+			if (description.getInstructionEndian().isBigEndian() == description.getEndian()
+					.isBigEndian()) {
+				throw new SleighException(
+					".ldefs says " + getLanguageID() + " is " + description.getEndian() +
+						" but .sla says " + el.getAttribute("bigendian"));
+			}
 		}
 		uniqueBase = SpecXmlUtils.decodeLong(el.getAttribute("uniqbase"));
 		alignment = SpecXmlUtils.decodeInt(el.getAttribute("align"));

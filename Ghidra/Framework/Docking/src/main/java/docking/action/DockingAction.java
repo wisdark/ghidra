@@ -52,7 +52,14 @@ import utilities.util.reflection.ReflectionUtilities;
  * method is used to determine if an action if applicable to the current context.   Overriding this
  * method allows actions to manage their own enablement.  Otherwise, the default behavior for this
  * method is to return the current enabled property of the action.  This allows for the possibility
- * for plugins to manage the enablement of its actions.
+ * for plugins to externally manage the enablement of its actions.
+ * <P>
+ * NOTE: If you wish to do your own external enablement management for an action (which is highly
+ * discouraged), it is very important that you don't use any of the internal enablement mechanisms
+ * by setting the predicates {@link #enabledWhen(Predicate)}, {@link #validContextWhen(Predicate)}
+ * or overriding {@link #isValidContext(ActionContext)}. These predicates and methods trigger
+ * internal enablement management which will interfere with you own calls to
+ * {@link DockingAction#setEnabled(boolean)}.
  */
 public abstract class DockingAction implements DockingActionIf {
 
@@ -437,8 +444,7 @@ public abstract class DockingAction implements DockingActionIf {
 		// menu path
 		if (menuBarData != null) {
 			buffer.append("        MENU PATH:           ")
-					.append(
-						menuBarData.getMenuPathAsString());
+					.append(menuBarData.getMenuPathAsString());
 			buffer.append('\n');
 			buffer.append("        MENU GROUP:        ").append(menuBarData.getMenuGroup());
 			buffer.append('\n');
@@ -461,8 +467,7 @@ public abstract class DockingAction implements DockingActionIf {
 		// popup menu path
 		if (popupMenuData != null) {
 			buffer.append("        POPUP PATH:         ")
-					.append(
-						popupMenuData.getMenuPathAsString());
+					.append(popupMenuData.getMenuPathAsString());
 			buffer.append('\n');
 			buffer.append("        POPUP GROUP:      ").append(popupMenuData.getMenuGroup());
 			buffer.append('\n');
@@ -528,6 +533,9 @@ public abstract class DockingAction implements DockingActionIf {
 	}
 
 	public void firePropertyChanged(String propertyName, Object oldValue, Object newValue) {
+		if (Objects.equals(oldValue, newValue)) {
+			return;
+		}
 		PropertyChangeEvent event = new PropertyChangeEvent(this, propertyName, oldValue, newValue);
 		for (PropertyChangeListener listener : propertyListeners) {
 			listener.propertyChange(event);

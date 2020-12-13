@@ -17,6 +17,7 @@ package ghidra.app.plugin.core.decompile.actions;
 
 import java.util.Iterator;
 
+import docking.widgets.EventTrigger;
 import ghidra.app.services.GraphDisplayBroker;
 import ghidra.framework.plugintool.PluginTool;
 import ghidra.program.model.address.Address;
@@ -35,6 +36,7 @@ public class ASTGraphTask extends Task {
 	enum GraphType {
 		CONTROL_FLOW_GRAPH("AST Control Flow"), DATA_FLOW_GRAPH("AST Data Flow");
 		private String name;
+
 		GraphType(String name) {
 			this.name = name;
 		}
@@ -119,12 +121,9 @@ public class ASTGraphTask extends Task {
 
 			String description =
 				graphType == GraphType.DATA_FLOW_GRAPH ? "AST Data Flow" : "AST Control Flow";
+			description = description + " for " + hfunction.getFunction().getName();
 			display.setGraph(graph, description, false, monitor);
-			// set the graph location
-			if (location != null) {
-				display.setLocation(displayListener.getVertexIdForAddress(location));
-			}
-
+			setGraphLocation(display, displayListener);
 		}
 		catch (GraphException e) {
 			Msg.showError(this, null, "Graph Error", e.getMessage());
@@ -133,6 +132,20 @@ public class ASTGraphTask extends Task {
 			return;
 		}
 
+	}
+
+	private void setGraphLocation(GraphDisplay display, ASTGraphDisplayListener displayListener) {
+		if (location == null) {
+			return;
+		}
+
+		AttributedVertex vertex = displayListener.getVertex(location);
+		if (vertex == null) {
+			return; // location not in graph
+		}
+
+		// update graph location, but don't have it send out event
+		display.setFocusedVertex(vertex, EventTrigger.INTERNAL_ONLY);
 	}
 
 	protected void createDataFlowGraph(AttributedGraph graph, TaskMonitor monitor)
@@ -191,7 +204,8 @@ public class ASTGraphTask extends Task {
 		}
 	}
 
-	private AttributedVertex getOpVertex(AttributedGraph graph, PcodeOpAST op, TaskMonitor monitor) {
+	private AttributedVertex getOpVertex(AttributedGraph graph, PcodeOpAST op,
+			TaskMonitor monitor) {
 
 		String key = "O_" + Integer.toString(op.getSeqnum().getTime());
 		AttributedVertex vertex = graph.getVertex(key);
@@ -223,7 +237,8 @@ public class ASTGraphTask extends Task {
 		vertex.setAttribute(VERTEX_TYPE_ATTRIBUTE, vertexType);
 	}
 
-	private AttributedVertex getDataVertex(AttributedGraph graph, Varnode node, TaskMonitor monitor) {
+	private AttributedVertex getDataVertex(AttributedGraph graph, Varnode node,
+			TaskMonitor monitor) {
 
 		// TODO: Missing Varnode unique ID ??
 
@@ -285,7 +300,8 @@ public class ASTGraphTask extends Task {
 		}
 	}
 
-	private AttributedVertex getBlockVertex(AttributedGraph graph, PcodeBlock pblock, TaskMonitor monitor) {
+	private AttributedVertex getBlockVertex(AttributedGraph graph, PcodeBlock pblock,
+			TaskMonitor monitor) {
 
 		String key = Integer.toString(pblock.getIndex());
 		AttributedVertex vertex = graph.getVertex(key);
