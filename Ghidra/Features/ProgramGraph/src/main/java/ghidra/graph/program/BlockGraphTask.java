@@ -18,10 +18,10 @@ package ghidra.graph.program;
 import java.awt.Color;
 import java.util.*;
 
+import docking.widgets.EventTrigger;
 import ghidra.app.plugin.core.colorizer.ColorizingService;
 import ghidra.framework.plugintool.PluginTool;
-import ghidra.program.model.address.Address;
-import ghidra.program.model.address.AddressSetView;
+import ghidra.program.model.address.*;
 import ghidra.program.model.block.*;
 import ghidra.program.model.listing.*;
 import ghidra.program.model.symbol.*;
@@ -105,33 +105,32 @@ public class BlockGraphTask extends Task {
 	private CodeBlockModel blockModel;
 	private AddressSetView selection;
 	private ProgramLocation location;
-	private GraphDisplayProvider graphService;
+	private GraphDisplayProvider graphProvider;
 	private boolean reuseGraph;
 	private boolean appendGraph;
 	private PluginTool tool;
-	private String actionName;
 	private Program program;
-
+	private AddressSetView graphScope;
+	private String graphTitle;
 
 	public BlockGraphTask(String actionName, boolean graphEntryPointNexus, boolean showCode,
 			boolean reuseGraph, boolean appendGraph, PluginTool tool, ProgramSelection selection,
 			ProgramLocation location, CodeBlockModel blockModel,
-			GraphDisplayProvider graphService) {
+			GraphDisplayProvider graphProvider) {
 
 		super("Graph Program", true, false, true);
-		this.actionName = actionName;
-
 		this.graphEntryPointNexus = graphEntryPointNexus;
 		this.showCode = showCode;
 		this.reuseGraph = reuseGraph;
 		this.appendGraph = appendGraph;
 		this.tool = tool;
 		this.blockModel = blockModel;
-		this.graphService = graphService;
+		this.graphProvider = graphProvider;
 		this.colorizingService = tool.getService(ColorizingService.class);
 		this.selection = selection;
 		this.location = location;
 		this.program = blockModel.getProgram();
+		this.graphTitle = actionName + ": ";
 	}
 
 	/**
@@ -139,10 +138,11 @@ public class BlockGraphTask extends Task {
 	 */
 	@Override
 	public void run(TaskMonitor monitor) throws CancelledException {
+		this.graphScope = getGraphScopeAndGenerateGraphTitle();
 		AttributedGraph graph = createGraph();
 		monitor.setMessage("Generating Graph...");
 		try {
-			GraphDisplay display = graphService.getGraphDisplay(reuseGraph, monitor);
+			GraphDisplay display = graphProvider.getGraphDisplay(reuseGraph, monitor);
 			BlockModelGraphDisplayListener listener =
 				new BlockModelGraphDisplayListener(tool, blockModel, display);
 			display.setGraphDisplayListener(listener);
@@ -153,15 +153,18 @@ public class BlockGraphTask extends Task {
 				display.setVertexLabel(CODE_ATTRIBUTE, GraphDisplay.ALIGN_LEFT, 12, true,
 					codeLimitPerBlock + 1);
 			}
-			display.setGraph(graph, actionName, appendGraph, monitor);
+			display.setGraph(graph, graphTitle, appendGraph, monitor);
 
 			if (location != null) {
-				display.setLocation(listener.getVertexIdForAddress(location.getAddress()));
+				// initialize the graph location, but don't have the graph send an event
+				AttributedVertex vertex = listener.getVertex(location.getAddress());
+				display.setFocusedVertex(vertex, EventTrigger.INTERNAL_ONLY);
 			}
 			if (selection != null && !selection.isEmpty()) {
-				List<String> selectedVertices = listener.getVertices(selection);
+				Set<AttributedVertex> selectedVertices = listener.getVertices(selection);
 				if (selectedVertices != null) {
-					display.selectVertices(selectedVertices);
+					// initialize the graph selection, but don't have the graph send an event
+					display.selectVertices(selectedVertices, EventTrigger.INTERNAL_ONLY);
 				}
 			}
 		}
@@ -206,15 +209,67 @@ public class BlockGraphTask extends Task {
 		return graph;
 	}
 
-
 	private CodeBlockIterator getBlockIterator() throws CancelledException {
-		if (selection == null || selection.isEmpty()) {
-			return blockModel.getCodeBlocks(taskMonitor);
-		}
-		return blockModel.getCodeBlocksContaining(selection, taskMonitor);
+		return blockModel.getCodeBlocksContaining(graphScope, taskMonitor);
 	}
 
-	private Address graphBlock(AttributedGraph graph, CodeBlock curBB, List<AttributedVertex> entries)
+	private AddressSetView getGraphScopeAndGenerateGraphTitle() {
+		if (selection != null && !selection.isEmpty()) {
+			graphTitle += selection.getMinAddress().toString();
+			return selection;
+		}
+		Function function = getContainingFunction(location);
+		if (function != null) {
+			graphTitle += function.getName();
+			if (isCallGraph()) {
+				return getScopeForCallGraph(function);
+			}
+			return function.getBody();
+		}
+		graphTitle += "(Entire Program)";
+		return blockModel.getProgram().getMemory();
+	}
+
+	private boolean isCallGraph() {
+		return blockModel instanceof SubroutineBlockModel;
+	}
+
+	private AddressSetView getScopeForCallGraph(Function function) {
+		AddressSet set = new AddressSet();
+		set.add(function.getBody());
+		try {
+			CodeBlock block = blockModel.getCodeBlockAt(function.getEntryPoint(), taskMonitor);
+			CodeBlockReferenceIterator it = blockModel.getDestinations(block, taskMonitor);
+			while (it.hasNext()) {
+				CodeBlockReference next = it.next();
+				set.add(next.getDestinationBlock());
+			}
+			it = blockModel.getSources(block, taskMonitor);
+			while (it.hasNext()) {
+				CodeBlockReference next = it.next();
+				set.add(next.getSourceBlock());
+			}
+		}
+		catch (CancelledException e) {
+			// just return, the task is being cancelled.
+		}
+
+		return set;
+	}
+
+	private Function getContainingFunction(ProgramLocation cursorLocation) {
+		if (cursorLocation == null) {
+			return null;
+		}
+		Address address = cursorLocation.getAddress();
+		if (address == null) {
+			return null;
+		}
+		return blockModel.getProgram().getFunctionManager().getFunctionContaining(address);
+	}
+
+	private Address graphBlock(AttributedGraph graph, CodeBlock curBB,
+			List<AttributedVertex> entries)
 			throws CancelledException {
 
 		Address[] startAddrs = curBB.getStartAddresses();
@@ -251,7 +306,6 @@ public class BlockGraphTask extends Task {
 		}
 	}
 
-
 	protected AttributedVertex graphBasicBlock(AttributedGraph graph, CodeBlock curBB)
 			throws CancelledException {
 
@@ -272,7 +326,7 @@ public class BlockGraphTask extends Task {
 
 			// don't include destination if it does not overlap selection
 			// always include if selection is empty
-			if (selection != null && !selection.isEmpty() && !selection.intersects(db)) {
+			if (graphScope != null && !graphScope.isEmpty() && !graphScope.intersects(db)) {
 				continue;
 			}
 
@@ -293,7 +347,8 @@ public class BlockGraphTask extends Task {
 		return fromVertex;
 	}
 
-	private void setEdgeColor(AttributedEdge edge, AttributedVertex fromVertex, AttributedVertex toVertex) {
+	private void setEdgeColor(AttributedEdge edge, AttributedVertex fromVertex,
+			AttributedVertex toVertex) {
 		// color the edge: first on the 'from' vertex, then try to 'to' vertex
 		String fromColor = fromVertex.getAttribute("Color");
 		String toColor = toVertex.getAttribute("Color");
@@ -305,7 +360,7 @@ public class BlockGraphTask extends Task {
 				edge.setAttribute("Color", toColor);
 			}
 		}
-		
+
 	}
 
 	private String getVertexId(CodeBlock bb) {

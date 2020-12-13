@@ -28,6 +28,7 @@ import javax.swing.event.TableModelEvent;
 import docking.action.builder.ActionBuilder;
 import docking.widgets.filechooser.GhidraFileChooser;
 import docking.widgets.filechooser.GhidraFileChooserMode;
+import docking.widgets.table.GTable;
 import docking.widgets.table.GTableFilterPanel;
 import generic.jar.ResourceFile;
 import generic.util.Path;
@@ -35,8 +36,7 @@ import ghidra.app.services.ConsoleService;
 import ghidra.framework.plugintool.ComponentProviderAdapter;
 import ghidra.framework.plugintool.PluginTool;
 import ghidra.framework.preferences.Preferences;
-import ghidra.util.HelpLocation;
-import ghidra.util.Msg;
+import ghidra.util.*;
 import ghidra.util.exception.CancelledException;
 import ghidra.util.filechooser.GhidraFileChooserModel;
 import ghidra.util.filechooser.GhidraFileFilter;
@@ -55,7 +55,7 @@ public class BundleStatusComponentProvider extends ComponentProviderAdapter {
 	static final String PREFERENCE_LAST_SELECTED_BUNDLE = "LastGhidraBundle";
 
 	private JPanel panel;
-	private LessFreneticGTable bundleStatusTable;
+	private GTable bundleStatusTable;
 	private final BundleStatusTableModel bundleStatusTableModel;
 	private GTableFilterPanel<BundleStatus> filterPanel;
 
@@ -102,7 +102,7 @@ public class BundleStatusComponentProvider extends ComponentProviderAdapter {
 	private void build() {
 		panel = new JPanel(new BorderLayout(5, 5));
 
-		bundleStatusTable = new LessFreneticGTable(bundleStatusTableModel);
+		bundleStatusTable = new GTable(bundleStatusTableModel);
 		bundleStatusTable.setName("BUNDLESTATUS_TABLE");
 		bundleStatusTable.setSelectionBackground(new Color(204, 204, 255));
 		bundleStatusTable.setSelectionForeground(Color.BLACK);
@@ -153,10 +153,10 @@ public class BundleStatusComponentProvider extends ComponentProviderAdapter {
 				.onAction(c -> doRefresh())
 				.buildAndInstallLocal(this);
 
-		addBundlesAction("ActivateBundles", "Enable selected bundle(s)",
+		addBundlesAction("EnableBundles", "Enable selected bundle(s)",
 			ResourceManager.loadImage("images/media-playback-start.png"), this::doEnableBundles);
 
-		addBundlesAction("DeactivateBundles", "Disable selected bundle(s)",
+		addBundlesAction("DisableBundles", "Disable selected bundle(s)",
 			ResourceManager.loadImage("images/media-playback-stop.png"), this::doDisableBundles);
 
 		addBundlesAction("CleanBundles", "Clean selected bundle build cache(s)",
@@ -320,14 +320,18 @@ public class BundleStatusComponentProvider extends ComponentProviderAdapter {
 	}
 
 	private void notifyTableRowChanged(BundleStatus status) {
-		int modelRowIndex = bundleStatusTableModel.getRowIndex(status);
-		int viewRowIndex = filterPanel.getViewRow(modelRowIndex);
-		bundleStatusTable
-				.notifyTableChanged(new TableModelEvent(bundleStatusTableModel, viewRowIndex));
+		Swing.runIfSwingOrRunLater(() -> {
+			int modelRowIndex = bundleStatusTableModel.getRowIndex(status);
+			int viewRowIndex = filterPanel.getViewRow(modelRowIndex);
+			bundleStatusTable
+					.notifyTableChanged(new TableModelEvent(bundleStatusTableModel, viewRowIndex));
+		});
 	}
 
 	private void notifyTableDataChanged() {
-		bundleStatusTable.notifyTableChanged(new TableModelEvent(bundleStatusTableModel));
+		Swing.runIfSwingOrRunLater(() -> {
+			bundleStatusTable.notifyTableChanged(new TableModelEvent(bundleStatusTableModel));
+		});
 	}
 
 	@Override
@@ -339,7 +343,7 @@ public class BundleStatusComponentProvider extends ComponentProviderAdapter {
 	 * cleanup this component
 	 */
 	public void dispose() {
-		bundleStatusTable.dispose();
+		filterPanel.dispose();
 	}
 
 	void selectModelRow(int modelRowIndex) {
@@ -373,24 +377,22 @@ public class BundleStatusComponentProvider extends ComponentProviderAdapter {
 		@Override
 		public void run(TaskMonitor monitor) throws CancelledException {
 			deactivateBundlesTask.run(monitor);
-			if (!monitor.isCancelled()) {
-				// partition bundles into system (bundles.get(true)) and non-system (bundles.get(false)).
-				Map<Boolean, List<GhidraBundle>> bundles = statuses.stream()
-						.map(bs -> bundleHost.getExistingGhidraBundle(bs.getFile()))
-						.collect(Collectors.partitioningBy(GhidraBundle::isSystemBundle));
+			monitor.checkCanceled();
+			// partition bundles into system (bundles.get(true)) and non-system (bundles.get(false)).
+			Map<Boolean, List<GhidraBundle>> bundles = statuses.stream()
+					.map(bs -> bundleHost.getExistingGhidraBundle(bs.getFile()))
+					.collect(Collectors.partitioningBy(GhidraBundle::isSystemBundle));
 
-				List<GhidraBundle> systemBundles = bundles.get(true);
-				if (!systemBundles.isEmpty()) {
-					StringBuilder stringBuilder = new StringBuilder();
-					for (GhidraBundle bundle : systemBundles) {
-						stringBuilder.append(Path.toPathString(bundle.getFile()) + "\n");
-					}
-					Msg.showWarn(this, BundleStatusComponentProvider.this.getComponent(),
-						"Unabled to remove",
-						"System bundles cannot be removed:\n" + stringBuilder.toString());
+			List<GhidraBundle> systemBundles = bundles.get(true);
+			if (!systemBundles.isEmpty()) {
+				StringBuilder buff = new StringBuilder();
+				for (GhidraBundle bundle : systemBundles) {
+					buff.append(Path.toPathString(bundle.getFile()) + "\n");
 				}
-				bundleHost.remove(bundles.get(false));
+				Msg.showWarn(this, BundleStatusComponentProvider.this.getComponent(),
+					"Unabled to remove", "System bundles cannot be removed:\n" + buff.toString());
 			}
+			bundleHost.remove(bundles.get(false));
 		}
 	}
 
@@ -415,8 +417,6 @@ public class BundleStatusComponentProvider extends ComponentProviderAdapter {
 
 		@Override
 		public void run(TaskMonitor monitor) throws CancelledException {
-			// suppress RowObjectSelectionManager repairs until after we're done
-			bundleStatusTable.chill();
 
 			List<GhidraBundle> bundles = new ArrayList<>();
 			for (BundleStatus status : statuses) {
@@ -450,8 +450,6 @@ public class BundleStatusComponentProvider extends ComponentProviderAdapter {
 			if (anybusy) {
 				notifyTableDataChanged();
 			}
-
-			bundleStatusTable.thaw();
 		}
 	}
 
