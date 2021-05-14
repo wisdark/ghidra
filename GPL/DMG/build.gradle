@@ -1,3 +1,6 @@
+/* ###
+ * IP: Public Domain
+ */
 apply from: file("../gpl.gradle").getCanonicalPath()
 
 if (findProject(':Generic') != null) {
@@ -37,6 +40,10 @@ sourceSets {
 }
 
 eclipse.classpath.plusConfigurations += [configurations.dmgCompile]
+
+repositories {
+	flatDir name: "flat", dirs:["data/lib"]
+}
 
 dependencies {
 	dmgCompile ':csframework@jar'

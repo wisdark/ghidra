@@ -36,6 +36,8 @@ public class ObjectChooserDialog<T> extends DialogComponentProvider {
 		this.objectClass = objectClass;
 		this.choosableObjects = choosableObjects;
 		this.methodsForColumns = methodsForColumns;
+
+		setTransient(true);
 		addWorkPanel(buildWorkPanel());
 		addOKButton();
 		addCancelButton();
@@ -93,5 +95,6 @@ public class ObjectChooserDialog<T> extends DialogComponentProvider {
 	@Override
 	public void close() {
 		table.dispose();
+		super.close();
 	}
 }

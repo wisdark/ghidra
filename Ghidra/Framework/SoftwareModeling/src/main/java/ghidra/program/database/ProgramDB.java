@@ -96,8 +96,11 @@ public class ProgramDB extends DomainObjectAdapterDB implements Program, ChangeM
 	 * 19-Jun-2020 - version 22 - Corrected fixed length indexing implementation causing
 	 *                            change in index table low-level storage for newly
 	 *                            created tables. 
+	 * 18-Feb-2021 - version 23   Added support for Big Reflist for tracking FROM references.
+	 *                            Primarily used for large numbers of Entry Point references.
+	 * 31-Mar-2021 - version 24   Added support for CompilerSpec extensions                          
 	 */
-	static final int DB_VERSION = 22;
+	static final int DB_VERSION = 24;
 
 	/**
 	 * UPGRADE_REQUIRED_BFORE_VERSION should be changed to DB_VERSION anytime the
@@ -216,8 +219,13 @@ public class ProgramDB extends DomainObjectAdapterDB implements Program, ChangeM
 			throws IOException {
 		super(new DBHandle(), name, 500, 1000, consumer);
 
+		if (!(compilerSpec instanceof BasicCompilerSpec)) {
+			throw new IllegalArgumentException(
+				"unsupported compilerSpec: " + compilerSpec.getClass().getName());
+		}
+
 		this.language = language;
-		this.compilerSpec = compilerSpec;
+		this.compilerSpec = ProgramCompilerSpec.getProgramCompilerSpec(this, compilerSpec);
 
 		languageID = language.getLanguageID();
 		compilerSpecID = compilerSpec.getCompilerSpecID();
@@ -242,7 +250,7 @@ public class ProgramDB extends DomainObjectAdapterDB implements Program, ChangeM
 			programUserData = new ProgramUserDataDB(this);
 			endTransaction(id, true);
 			clearUndo(false);
-			compilerSpec.registerProgramOptions(this);
+			registerCompilerSpecOptions();
 			getCodeManager().activateContextLocking();
 			success = true;
 		}
@@ -351,7 +359,9 @@ public class ProgramDB extends DomainObjectAdapterDB implements Program, ChangeM
 			recordChanges = true;
 			endTransaction(id, true);
 			clearUndo(false);
-			compilerSpec.registerProgramOptions(this);
+			SpecExtension.checkFormatVersion(this);
+			installExtensions();
+			registerCompilerSpecOptions();
 			getCodeManager().activateContextLocking();
 			success = true;
 		}
@@ -372,12 +382,13 @@ public class ProgramDB extends DomainObjectAdapterDB implements Program, ChangeM
 	 * @throws CompilerSpecNotFoundException if the compiler spec cannot be found
 	 */
 	private void initCompilerSpec() throws CompilerSpecNotFoundException {
+		CompilerSpec langSpec;
 		try {
 			if (languageUpgradeTranslator != null) {
-				compilerSpec = languageUpgradeTranslator.getOldCompilerSpec(compilerSpecID);
+				langSpec = languageUpgradeTranslator.getOldCompilerSpec(compilerSpecID);
 			}
 			else {
-				compilerSpec = language.getCompilerSpecByID(compilerSpecID);
+				langSpec = language.getCompilerSpecByID(compilerSpecID);
 			}
 		}
 		catch (CompilerSpecNotFoundException e) {
@@ -385,12 +396,13 @@ public class ProgramDB extends DomainObjectAdapterDB implements Program, ChangeM
 				"Compiler Spec " + compilerSpecID + " for Language " +
 					language.getLanguageDescription().getDescription() +
 					" Not Found, using default: " + e);
-			compilerSpec = language.getDefaultCompilerSpec();
+			langSpec = language.getDefaultCompilerSpec();
 			if (compilerSpec == null) {
 				throw e;
 			}
 			compilerSpecID = compilerSpec.getCompilerSpecID();
 		}
+		compilerSpec = ProgramCompilerSpec.getProgramCompilerSpec(this, langSpec);
 	}
 
 	/**
@@ -410,8 +422,7 @@ public class ProgramDB extends DomainObjectAdapterDB implements Program, ChangeM
 			Language newLanguage = language;
 
 			Language oldLanguage = OldLanguageFactory.getOldLanguageFactory()
-					.getOldLanguage(
-						languageID, languageVersion);
+					.getOldLanguage(languageID, languageVersion);
 			if (oldLanguage == null) {
 				// Assume minor version behavior - old language does not exist for current major version
 				Msg.error(this, "Old language specification not found: " + languageID +
@@ -420,10 +431,8 @@ public class ProgramDB extends DomainObjectAdapterDB implements Program, ChangeM
 			}
 
 			// Ensure that we can upgrade the language
-			languageUpgradeTranslator =
-				LanguageTranslatorFactory.getLanguageTranslatorFactory()
-						.getLanguageTranslator(
-							oldLanguage, newLanguage);
+			languageUpgradeTranslator = LanguageTranslatorFactory.getLanguageTranslatorFactory()
+					.getLanguageTranslator(oldLanguage, newLanguage);
 			if (languageUpgradeTranslator == null) {
 
 // TODO: This is a bad situation!! Most language revisions should be supportable, if not we have no choice but to throw 
@@ -465,10 +474,8 @@ public class ProgramDB extends DomainObjectAdapterDB implements Program, ChangeM
 	private VersionException checkForLanguageChange(LanguageNotFoundException e, int openMode)
 			throws LanguageNotFoundException {
 
-		languageUpgradeTranslator =
-			LanguageTranslatorFactory.getLanguageTranslatorFactory()
-					.getLanguageTranslator(
-						languageID, languageVersion);
+		languageUpgradeTranslator = LanguageTranslatorFactory.getLanguageTranslatorFactory()
+				.getLanguageTranslator(languageID, languageVersion);
 		if (languageUpgradeTranslator == null) {
 			throw e;
 		}
@@ -806,11 +813,17 @@ public class ProgramDB extends DomainObjectAdapterDB implements Program, ChangeM
 	 * notification the a datatype has changed
 	 * @param dataTypeID the id of the datatype that changed.
 	 * @param type the type of the change (moved, renamed, etc.)
+	 * @param isAutoChange true if change was an automatic change in response to 
+	 * another datatype's change (e.g., size, alignment), else false in which case this
+	 * change will be added to program change-set to aid merge conflict detection.
 	 * @param oldValue the old datatype.
 	 * @param newValue the new datatype.
 	 */
-	public void dataTypeChanged(long dataTypeID, int type, Object oldValue, Object newValue) {
-		if (recordChanges) {
+	public void dataTypeChanged(long dataTypeID, int type, boolean isAutoChange,
+			Object oldValue, Object newValue) {
+		// TODO: do not need to record type changes for packed composite change which is in repsonse
+		// to component size or alignment change.
+		if (recordChanges && !isAutoChange) {
 			((ProgramDBChangeSet) changeSet).dataTypeChanged(dataTypeID);
 		}
 		changed = true;
@@ -1155,7 +1168,7 @@ public class ProgramDB extends DomainObjectAdapterDB implements Program, ChangeM
 			if (name.equals(newName)) {
 				return;
 			}
-			Record record = table.getRecord(new StringField(PROGRAM_NAME));
+			DBRecord record = table.getRecord(new StringField(PROGRAM_NAME));
 			record.setString(0, newName);
 			table.putRecord(record);
 			getTreeManager().setProgramName(name, newName);
@@ -1170,7 +1183,7 @@ public class ProgramDB extends DomainObjectAdapterDB implements Program, ChangeM
 	}
 
 	private void refreshName() throws IOException {
-		Record record = table.getRecord(new StringField(PROGRAM_NAME));
+		DBRecord record = table.getRecord(new StringField(PROGRAM_NAME));
 		name = record.getString(0);
 	}
 
@@ -1199,8 +1212,7 @@ public class ProgramDB extends DomainObjectAdapterDB implements Program, ChangeM
 	 * @throws MemoryConflictException if image base override is active
 	 */
 	public AddressSpace addOverlaySpace(String blockName, AddressSpace originalSpace,
-			long minOffset, long maxOffset)
-			throws LockException, MemoryConflictException {
+			long minOffset, long maxOffset) throws LockException, MemoryConflictException {
 
 		checkExclusiveAccess();
 		if (imageBaseOverride) {
@@ -1265,7 +1277,7 @@ public class ProgramDB extends DomainObjectAdapterDB implements Program, ChangeM
 	}
 
 	private long getStoredBaseImageOffset() throws IOException {
-		Record rec = table.getRecord(new StringField(IMAGE_OFFSET));
+		DBRecord rec = table.getRecord(new StringField(IMAGE_OFFSET));
 		if (rec != null) {
 			return (new BigInteger(rec.getString(0), 16)).longValue();
 		}
@@ -1325,7 +1337,7 @@ public class ProgramDB extends DomainObjectAdapterDB implements Program, ChangeM
 
 			if (commit) {
 				try {
-					Record record = SCHEMA.createRecord(new StringField(IMAGE_OFFSET));
+					DBRecord record = SCHEMA.createRecord(new StringField(IMAGE_OFFSET));
 					record.setString(0, Long.toHexString(base.getOffset()));
 					table.putRecord(record);
 
@@ -1384,7 +1396,7 @@ public class ProgramDB extends DomainObjectAdapterDB implements Program, ChangeM
 
 	private void createDatabase() throws IOException {
 		table = dbh.createTable(TABLE_NAME, SCHEMA);
-		Record record = SCHEMA.createRecord(new StringField(PROGRAM_NAME));
+		DBRecord record = SCHEMA.createRecord(new StringField(PROGRAM_NAME));
 		record.setString(0, name);
 		table.putRecord(record);
 
@@ -1432,7 +1444,7 @@ public class ProgramDB extends DomainObjectAdapterDB implements Program, ChangeM
 		if (table == null) {
 			throw new IOException("Unsupported File Content");
 		}
-		Record record = table.getRecord(new StringField(PROGRAM_NAME));
+		DBRecord record = table.getRecord(new StringField(PROGRAM_NAME));
 		name = record.getString(0);
 
 		record = table.getRecord(new StringField(LANGUAGE_ID));
@@ -1501,7 +1513,7 @@ public class ProgramDB extends DomainObjectAdapterDB implements Program, ChangeM
 		table = dbh.getTable(TABLE_NAME);
 		Field key = new StringField(PROGRAM_DB_VERSION);
 		String versionStr = Integer.toString(DB_VERSION);
-		Record record = table.getRecord(key);
+		DBRecord record = table.getRecord(key);
 		if (record != null && versionStr.equals(record.getString(0))) {
 			return; // already has correct version
 		}
@@ -1534,7 +1546,7 @@ public class ProgramDB extends DomainObjectAdapterDB implements Program, ChangeM
 	}
 
 	public int getStoredVersion() throws IOException {
-		Record record = table.getRecord(new StringField(PROGRAM_DB_VERSION));
+		DBRecord record = table.getRecord(new StringField(PROGRAM_DB_VERSION));
 		if (record != null) {
 			String s = record.getString(0);
 			try {
@@ -1549,7 +1561,7 @@ public class ProgramDB extends DomainObjectAdapterDB implements Program, ChangeM
 
 	private void checkOldProperties(int openMode, TaskMonitor monitor)
 			throws IOException, VersionException {
-		Record record = table.getRecord(new StringField(EXECUTE_PATH));
+		DBRecord record = table.getRecord(new StringField(EXECUTE_PATH));
 		if (record != null) {
 			if (openMode == READ_ONLY) {
 				return; // not important, get on path or format will return "unknown"
@@ -1836,6 +1848,7 @@ public class ProgramDB extends DomainObjectAdapterDB implements Program, ChangeM
 			for (int i = 0; i < NUM_MANAGERS; i++) {
 				managers[i].invalidateCache(all);
 			}
+			installExtensions(); // Reload any extensions
 		}
 		catch (IOException e) {
 			dbError(e);
@@ -2000,8 +2013,7 @@ public class ProgramDB extends DomainObjectAdapterDB implements Program, ChangeM
 		}
 		LanguageTranslator languageTranslator =
 			LanguageTranslatorFactory.getLanguageTranslatorFactory()
-					.getLanguageTranslator(language,
-						newLanguage);
+					.getLanguageTranslator(language, newLanguage);
 		if (languageTranslator == null) {
 			throw new IncompatibleLanguageException("Language translation not supported");
 		}
@@ -2052,7 +2064,8 @@ public class ProgramDB extends DomainObjectAdapterDB implements Program, ChangeM
 				}
 
 				if (newCompilerSpecID != null) {
-					compilerSpec = language.getCompilerSpecByID(newCompilerSpecID);
+					compilerSpec = ProgramCompilerSpec.getProgramCompilerSpec(this,
+						language.getCompilerSpecByID(newCompilerSpecID));
 				}
 				compilerSpecID = compilerSpec.getCompilerSpecID();
 				languageVersion = language.getVersion();
@@ -2098,7 +2111,7 @@ public class ProgramDB extends DomainObjectAdapterDB implements Program, ChangeM
 					translator.fixupInstructions(this, translator.getOldLanguage(), monitor);
 				}
 
-				Record record = SCHEMA.createRecord(new StringField(LANGUAGE_ID));
+				DBRecord record = SCHEMA.createRecord(new StringField(LANGUAGE_ID));
 				record.setString(0, languageID.getIdAsString());
 				table.putRecord(record);
 				record = SCHEMA.createRecord(new StringField(COMPILER_SPEC_ID));
@@ -2110,7 +2123,6 @@ public class ProgramDB extends DomainObjectAdapterDB implements Program, ChangeM
 				setChanged(true);
 				clearCache(true);
 				invalidate();
-
 			}
 			catch (Throwable t) {
 				throw new IllegalStateException(
@@ -2456,5 +2468,30 @@ public class ProgramDB extends DomainObjectAdapterDB implements Program, ChangeM
 		ProgramRegisterContextDB contextMgr = (ProgramRegisterContextDB) getProgramContext();
 		contextMgr.flushProcessorContextWriteCache();
 		super.flushWriteCache();
+	}
+
+	/**
+	 * Install updated compiler spec extension options.
+	 * See {@link SpecExtension}.
+	 */
+	protected void installExtensions() {
+		if (!(compilerSpec instanceof ProgramCompilerSpec)) {
+			return;
+		}
+		lock.acquire();
+		try {
+			((ProgramCompilerSpec) compilerSpec).installExtensions();
+		}
+		finally {
+			lock.release();
+		}
+	}
+
+	private void registerCompilerSpecOptions() {
+		if (!(compilerSpec instanceof ProgramCompilerSpec)) {
+			throw new AssertException(
+				"unsupported compilerSpec: " + compilerSpec.getClass().getName());
+		}
+		((ProgramCompilerSpec) compilerSpec).registerProgramOptions();
 	}
 }

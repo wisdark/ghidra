@@ -171,6 +171,35 @@ public class FillOutStructureCmd extends BackgroundCommand {
 	}
 
 	/**
+	 * Method to create a structure data type for a variable in the given function.
+	 * Unlike the applyTo() action, this method will not modify the function, its variables,
+	 * or any existing data-types. A new structure is always created.
+	 * @param var a parameter, local variable, or global variable used in the given function
+	 * @param function the function to process
+	 * @return a filled-in structure or null if one could not be created
+	 */
+	public Structure processStructure(HighVariable var, Function function) {
+
+		if (var == null || var.getSymbol() == null || var.getOffset() >= 0) {
+			return null;
+		}
+
+		Structure structDT;
+
+		try {
+			fillOutStructureDef(var);
+			pushIntoCalls();
+			structDT = createStructure(null, var, function, false);
+			populateStructure(structDT);
+		}
+		catch (Exception e) {
+			return null;
+		}
+
+		return structDT;
+	}
+
+	/**
 	 * Retrieve the component map that was generated when structure was created using decomiler info
 	 * @return componentMap
 	 */
@@ -421,13 +450,8 @@ public class FillOutStructureCmd extends BackgroundCommand {
 			structDT = createNewStruct(var, (int) componentMap.getSize(), f, isThisParam);
 		}
 		else {
-			int len;
-			if (structDT.isNotYetDefined()) {
-				len = 0;
-			}
-			else {
-				len = structDT.getLength();
-			}
+			// FIXME: How should an existing packed structure be handled? Growing and offset-based placement does not apply
+			int len = structDT.isZeroLength() ? 0 : structDT.getLength();
 			if (componentMap.getSize() > len) {
 				structDT.growStructure((int) componentMap.getSize() - len);
 			}
@@ -492,13 +516,8 @@ public class FillOutStructureCmd extends BackgroundCommand {
 				return null;
 			}
 			Structure structDT = VariableUtilities.findOrCreateClassStruct(f);
-			int len;
-			if (structDT.isNotYetDefined()) {
-				len = 0; // getLength reports as at least size 1
-			}
-			else {
-				len = structDT.getLength();
-			}
+// FIXME: How should an existing packed structure be handled? Growing and offset-based placement does not apply
+			int len = structDT.isZeroLength() ? 0 : structDT.getLength();
 			if (len < size) {
 				structDT.growStructure(size - len);
 			}
