@@ -18,7 +18,7 @@
 
 <h1>Ghidra Installation Guide</h1>
 <p>
-The installation information provided is effective as of Ghidra 9.2 and is subject to change with
+The installation information provided is effective as of Ghidra 10.0.1 and is subject to change with
 future releases.
 </p>
 
@@ -137,12 +137,19 @@ destination using any unzip program (built-in OS utilities, 7-Zip, WinZip, WinRA
     will be prompted to enter a path to the Java home directory to use (the Java home directory is 
     the parent directory of Java's <i>bin</i> directory).  This minimizes the impact Ghidra has on 
     pre-existing configurations of Java that other software may rely on.
-  </li>  
+  </li>
+  <li>
+    Depending on your operating system, it may be possible to find and install a 
+    <a href="#Requirements">supported</a> version of a Java Runtime and Development Kit through 
+    your package manager, without the need to set the Path environment variables as described 
+    below.
+  </li>
   <li>
     If Ghidra failed to run because <i>no versions</i> of Java were on the PATH, a 
-    <a href="#Requirements">supported</a> JDK should be manually installed and added to the 
-    PATH.  The following steps outline how to add a JDK distribution to the operating system's 
-    PATH.
+    <a href="#Requirements">supported</a> JDK should be installed via a Linux package manager 
+    (aptitude, yum, etc), Windows installer program (*.exe, *.msi), macOS Installer package 
+    (*.pkg), or manually extracted and added to the PATH.  The following steps outline how to 
+    manually extract and add a JDK distribution to the operating system's PATH.
     <ul>
       <li>
         <p><b>Windows: </b>Extract the JDK distribution (.zip file) to your desired location 
@@ -174,10 +181,11 @@ destination using any unzip program (built-in OS utilities, 7-Zip, WinZip, WinRA
           <li>
             <p>Add the JDK bin directory to the PATH variable:</p>
             <ol>
-              <li>Under System variables, highlight <i>Path</i> and click <b>Edit...</b></li>
+              <li>Under <b>System variables</b>, highlight <i>Path</i> and click <b>Edit...</b></li>
               <li>
                 At the end of the the <i>Variable value</i> field, add a semicolon followed by 
-                <i>&lt;path of extracted JDK dir&gt;\bin</i>  
+                <i>&lt;path of extracted JDK dir&gt;\bin</i>, or use the <b>New</b> button in the
+                <i>Edit environment variable</i> window to add a new entry to the <i>Path</i>.
               </li>
               <li>Click <b>OK</b></li>
               <li>Click <b>OK</b></li>
@@ -537,12 +545,19 @@ be installed in a pre-existing Eclipse installation.</p>
     new files.  Future versions of Ghidra will address this in order to ensure compatibility with
     the newest versions of Java.
   </li>
+  <li>
+    Ghidra will not launch when its path contains a "!" character.  This is to avoid issues that 
+    Java's internal libraries have parsing these paths ("!" is used as a jar-separator by Java).
+  </li>
 </ul>
 <h3><a name="WindowsIssues"></a>Windows</h3>
 <ul>
   <li>
     Older versions of 7-Zip may not be able to unpack the Ghidra distribution file if it contains
     any files with a 0-byte length.  Upgrade to a newer version of 7-Zip to fix this problem.
+  </li>
+  <li>
+    Ghidra will fail to launch when its path contains a "^" character.
   </li>
 </ul>
 <h3><a name="LinuxIssues"></a>Linux</h3>

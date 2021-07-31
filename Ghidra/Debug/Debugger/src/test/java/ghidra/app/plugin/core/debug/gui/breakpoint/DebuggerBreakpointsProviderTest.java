@@ -27,10 +27,13 @@ import org.junit.Test;
 
 import com.google.common.collect.Range;
 
+import docking.widgets.table.RowWrappedEnumeratedColumnTableModel;
 import generic.Unique;
 import ghidra.app.plugin.core.debug.gui.AbstractGhidraHeadedDebuggerGUITest;
 import ghidra.app.plugin.core.debug.gui.DebuggerResources.*;
 import ghidra.app.plugin.core.debug.gui.breakpoint.DebuggerBreakpointsProvider.LogicalBreakpointTableModel;
+import ghidra.app.plugin.core.debug.gui.console.DebuggerConsolePlugin;
+import ghidra.app.plugin.core.debug.service.modules.DebuggerStaticMappingUtils;
 import ghidra.app.services.*;
 import ghidra.app.services.LogicalBreakpoint.Enablement;
 import ghidra.async.AsyncTestUtils;
@@ -69,7 +72,7 @@ public class DebuggerBreakpointsProviderTest extends AbstractGhidraHeadedDebugge
 
 	protected void addMapping(Trace trace, Program prog) throws Exception {
 		try (UndoableTransaction tid = UndoableTransaction.start(trace, "Add mapping", true)) {
-			mappingService.addMapping(
+			DebuggerStaticMappingUtils.addMapping(
 				new DefaultTraceLocation(trace, null, Range.atLeast(0L), addr(trace, 0x55550000)),
 				new ProgramLocation(prog, addr(prog, 0x00400000)), 0x1000, false);
 		}
@@ -260,12 +263,12 @@ public class DebuggerBreakpointsProviderTest extends AbstractGhidraHeadedDebugge
 		programManager.openProgram(program);
 		waitForSwing();
 
-		assertFalse(breakpointsProvider.actionEnableSelectedBreakpointsAction.isEnabled());
+		assertFalse(breakpointsProvider.actionEnableSelectedBreakpoints.isEnabled());
 
 		addStaticMemoryAndBreakpoint();
 		waitForDomainObject(program);
 
-		assertFalse(breakpointsProvider.actionEnableSelectedBreakpointsAction.isEnabled());
+		assertFalse(breakpointsProvider.actionEnableSelectedBreakpoints.isEnabled());
 
 		LogicalBreakpointRow row =
 			Unique.assertOne(breakpointsProvider.breakpointTableModel.getModelData());
@@ -274,28 +277,28 @@ public class DebuggerBreakpointsProviderTest extends AbstractGhidraHeadedDebugge
 		waitForSwing();
 
 		assertEquals(Enablement.INEFFECTIVE_DISABLED, row.getEnablement());
-		assertTrue(breakpointsProvider.actionEnableSelectedBreakpointsAction.isEnabled());
+		assertTrue(breakpointsProvider.actionEnableSelectedBreakpoints.isEnabled());
 
-		performAction(breakpointsProvider.actionEnableSelectedBreakpointsAction);
+		performAction(breakpointsProvider.actionEnableSelectedBreakpoints);
 
 		assertEquals(Enablement.INEFFECTIVE_ENABLED, row.getEnablement());
-		assertTrue(breakpointsProvider.actionEnableSelectedBreakpointsAction.isEnabled());
+		assertTrue(breakpointsProvider.actionEnableSelectedBreakpoints.isEnabled());
 
 		breakpointsProvider.breakpointTable.clearSelection();
 		waitForSwing();
 
-		assertFalse(breakpointsProvider.actionEnableSelectedBreakpointsAction.isEnabled());
+		assertFalse(breakpointsProvider.actionEnableSelectedBreakpoints.isEnabled());
 
 		breakpointsProvider.breakpointFilterPanel.setSelectedItem(row);
 		waitForSwing();
 
-		assertTrue(breakpointsProvider.actionEnableSelectedBreakpointsAction.isEnabled());
+		assertTrue(breakpointsProvider.actionEnableSelectedBreakpoints.isEnabled());
 
 		// Bookmark part should actually be synchronous.
 		waitOn(row.getLogicalBreakpoint().delete());
 		waitForDomainObject(program);
 
-		assertFalse(breakpointsProvider.actionEnableSelectedBreakpointsAction.isEnabled());
+		assertFalse(breakpointsProvider.actionEnableSelectedBreakpoints.isEnabled());
 	}
 
 	@Test
@@ -304,12 +307,12 @@ public class DebuggerBreakpointsProviderTest extends AbstractGhidraHeadedDebugge
 		programManager.openProgram(program);
 		waitForSwing();
 
-		assertFalse(breakpointsProvider.actionEnableAllBreakpointsAction.isEnabled());
+		assertFalse(breakpointsProvider.actionEnableAllBreakpoints.isEnabled());
 
 		addStaticMemoryAndBreakpoint();
 		waitForDomainObject(program);
 
-		assertTrue(breakpointsProvider.actionEnableAllBreakpointsAction.isEnabled());
+		assertTrue(breakpointsProvider.actionEnableAllBreakpoints.isEnabled());
 
 		LogicalBreakpointRow row =
 			Unique.assertOne(breakpointsProvider.breakpointTableModel.getModelData());
@@ -317,18 +320,18 @@ public class DebuggerBreakpointsProviderTest extends AbstractGhidraHeadedDebugge
 		waitForSwing();
 
 		assertEquals(Enablement.INEFFECTIVE_DISABLED, row.getEnablement());
-		assertTrue(breakpointsProvider.actionEnableAllBreakpointsAction.isEnabled());
+		assertTrue(breakpointsProvider.actionEnableAllBreakpoints.isEnabled());
 
-		performAction(breakpointsProvider.actionEnableAllBreakpointsAction);
+		performAction(breakpointsProvider.actionEnableAllBreakpoints);
 
 		assertEquals(Enablement.INEFFECTIVE_ENABLED, row.getEnablement());
-		assertTrue(breakpointsProvider.actionEnableAllBreakpointsAction.isEnabled());
+		assertTrue(breakpointsProvider.actionEnableAllBreakpoints.isEnabled());
 
 		// Bookmark part should actually be synchronous.
 		row.getLogicalBreakpoint().delete().get(TIMEOUT_MILLIS, TimeUnit.MILLISECONDS);
 		waitForDomainObject(program);
 
-		assertFalse(breakpointsProvider.actionEnableAllBreakpointsAction.isEnabled());
+		assertFalse(breakpointsProvider.actionEnableAllBreakpoints.isEnabled());
 	}
 
 	@Test
@@ -337,12 +340,12 @@ public class DebuggerBreakpointsProviderTest extends AbstractGhidraHeadedDebugge
 		programManager.openProgram(program);
 		waitForSwing();
 
-		assertFalse(breakpointsProvider.actionDisableSelectedBreakpointsAction.isEnabled());
+		assertFalse(breakpointsProvider.actionDisableSelectedBreakpoints.isEnabled());
 
 		addStaticMemoryAndBreakpoint();
 		waitForDomainObject(program);
 
-		assertFalse(breakpointsProvider.actionDisableSelectedBreakpointsAction.isEnabled());
+		assertFalse(breakpointsProvider.actionDisableSelectedBreakpoints.isEnabled());
 
 		LogicalBreakpointRow row =
 			Unique.assertOne(breakpointsProvider.breakpointTableModel.getModelData());
@@ -350,28 +353,28 @@ public class DebuggerBreakpointsProviderTest extends AbstractGhidraHeadedDebugge
 		waitForSwing();
 
 		assertEquals(Enablement.INEFFECTIVE_ENABLED, row.getEnablement());
-		assertTrue(breakpointsProvider.actionDisableSelectedBreakpointsAction.isEnabled());
+		assertTrue(breakpointsProvider.actionDisableSelectedBreakpoints.isEnabled());
 
-		performAction(breakpointsProvider.actionDisableSelectedBreakpointsAction);
+		performAction(breakpointsProvider.actionDisableSelectedBreakpoints);
 
 		assertEquals(Enablement.INEFFECTIVE_DISABLED, row.getEnablement());
-		assertTrue(breakpointsProvider.actionDisableSelectedBreakpointsAction.isEnabled());
+		assertTrue(breakpointsProvider.actionDisableSelectedBreakpoints.isEnabled());
 
 		breakpointsProvider.breakpointTable.clearSelection();
 		waitForSwing();
 
-		assertFalse(breakpointsProvider.actionDisableSelectedBreakpointsAction.isEnabled());
+		assertFalse(breakpointsProvider.actionDisableSelectedBreakpoints.isEnabled());
 
 		breakpointsProvider.breakpointFilterPanel.setSelectedItem(row);
 		waitForSwing();
 
-		assertTrue(breakpointsProvider.actionDisableSelectedBreakpointsAction.isEnabled());
+		assertTrue(breakpointsProvider.actionDisableSelectedBreakpoints.isEnabled());
 
 		// Bookmark part should actually be synchronous.
 		waitOn(row.getLogicalBreakpoint().delete());
 		waitForDomainObject(program);
 
-		assertFalse(breakpointsProvider.actionDisableSelectedBreakpointsAction.isEnabled());
+		assertFalse(breakpointsProvider.actionDisableSelectedBreakpoints.isEnabled());
 	}
 
 	@Test
@@ -380,27 +383,27 @@ public class DebuggerBreakpointsProviderTest extends AbstractGhidraHeadedDebugge
 		programManager.openProgram(program);
 		waitForSwing();
 
-		assertFalse(breakpointsProvider.actionDisableAllBreakpointsAction.isEnabled());
+		assertFalse(breakpointsProvider.actionDisableAllBreakpoints.isEnabled());
 
 		addStaticMemoryAndBreakpoint();
 		waitForDomainObject(program);
 
-		assertTrue(breakpointsProvider.actionDisableAllBreakpointsAction.isEnabled());
+		assertTrue(breakpointsProvider.actionDisableAllBreakpoints.isEnabled());
 		LogicalBreakpointRow row =
 			Unique.assertOne(breakpointsProvider.breakpointTableModel.getModelData());
 		assertEquals(Enablement.INEFFECTIVE_ENABLED, row.getEnablement());
-		assertTrue(breakpointsProvider.actionDisableAllBreakpointsAction.isEnabled());
+		assertTrue(breakpointsProvider.actionDisableAllBreakpoints.isEnabled());
 
-		performAction(breakpointsProvider.actionDisableAllBreakpointsAction);
+		performAction(breakpointsProvider.actionDisableAllBreakpoints);
 
 		assertEquals(Enablement.INEFFECTIVE_DISABLED, row.getEnablement());
-		assertTrue(breakpointsProvider.actionDisableAllBreakpointsAction.isEnabled());
+		assertTrue(breakpointsProvider.actionDisableAllBreakpoints.isEnabled());
 
 		// Bookmark part should actually be synchronous.
 		row.getLogicalBreakpoint().delete().get(TIMEOUT_MILLIS, TimeUnit.MILLISECONDS);
 		waitForDomainObject(program);
 
-		assertFalse(breakpointsProvider.actionDisableAllBreakpointsAction.isEnabled());
+		assertFalse(breakpointsProvider.actionDisableAllBreakpoints.isEnabled());
 	}
 
 	@Test
@@ -409,34 +412,34 @@ public class DebuggerBreakpointsProviderTest extends AbstractGhidraHeadedDebugge
 		programManager.openProgram(program);
 		waitForSwing();
 
-		assertFalse(breakpointsProvider.actionClearSelectedBreakpointsAction.isEnabled());
+		assertFalse(breakpointsProvider.actionClearSelectedBreakpoints.isEnabled());
 
 		addStaticMemoryAndBreakpoint();
 		waitForDomainObject(program);
 
-		assertFalse(breakpointsProvider.actionClearSelectedBreakpointsAction.isEnabled());
+		assertFalse(breakpointsProvider.actionClearSelectedBreakpoints.isEnabled());
 
 		LogicalBreakpointRow row =
 			Unique.assertOne(breakpointsProvider.breakpointTableModel.getModelData());
 		breakpointsProvider.breakpointFilterPanel.setSelectedItem(row);
 		waitForSwing();
 
-		assertTrue(breakpointsProvider.actionClearSelectedBreakpointsAction.isEnabled());
+		assertTrue(breakpointsProvider.actionClearSelectedBreakpoints.isEnabled());
 
 		breakpointsProvider.breakpointTable.clearSelection();
 		waitForSwing();
 
-		assertFalse(breakpointsProvider.actionClearSelectedBreakpointsAction.isEnabled());
+		assertFalse(breakpointsProvider.actionClearSelectedBreakpoints.isEnabled());
 
 		breakpointsProvider.breakpointFilterPanel.setSelectedItem(row);
 		waitForSwing();
 
-		assertTrue(breakpointsProvider.actionClearSelectedBreakpointsAction.isEnabled());
+		assertTrue(breakpointsProvider.actionClearSelectedBreakpoints.isEnabled());
 
-		performAction(breakpointsProvider.actionClearSelectedBreakpointsAction);
+		performAction(breakpointsProvider.actionClearSelectedBreakpoints);
 
 		assertProviderEmpty();
-		assertFalse(breakpointsProvider.actionClearSelectedBreakpointsAction.isEnabled());
+		assertFalse(breakpointsProvider.actionClearSelectedBreakpoints.isEnabled());
 	}
 
 	@Test
@@ -445,17 +448,61 @@ public class DebuggerBreakpointsProviderTest extends AbstractGhidraHeadedDebugge
 		programManager.openProgram(program);
 		waitForSwing();
 
-		assertFalse(breakpointsProvider.actionClearAllBreakpointsAction.isEnabled());
+		assertFalse(breakpointsProvider.actionClearAllBreakpoints.isEnabled());
 
 		addStaticMemoryAndBreakpoint();
 		waitForDomainObject(program);
 
-		assertTrue(breakpointsProvider.actionClearAllBreakpointsAction.isEnabled());
+		assertTrue(breakpointsProvider.actionClearAllBreakpoints.isEnabled());
 
-		performAction(breakpointsProvider.actionClearAllBreakpointsAction);
+		performAction(breakpointsProvider.actionClearAllBreakpoints);
 
 		assertProviderEmpty();
-		assertFalse(breakpointsProvider.actionClearAllBreakpointsAction.isEnabled());
+		assertFalse(breakpointsProvider.actionClearAllBreakpoints.isEnabled());
+	}
+
+	@Test
+	public void testActionMakeBreakpointsEffective() throws Exception {
+		DebuggerConsolePlugin consolePlugin = addPlugin(tool, DebuggerConsolePlugin.class);
+
+		createTestModel();
+		mb.createTestProcessesAndThreads();
+		TraceRecorder recorder = modelService.recordTarget(mb.testProcess1,
+			new TestDebuggerTargetTraceMapper(mb.testProcess1));
+		Trace trace = recorder.getTrace();
+		createProgramFromTrace(trace);
+		intoProject(trace);
+		intoProject(program);
+
+		assertFalse(breakpointsProvider.actionMakeBreakpointsEffective.isEnabled());
+		programManager.openProgram(program);
+		assertFalse(breakpointsProvider.actionMakeBreakpointsEffective.isEnabled());
+		traceManager.openTrace(trace);
+		assertFalse(breakpointsProvider.actionMakeBreakpointsEffective.isEnabled());
+		addStaticMemoryAndBreakpoint();
+		assertFalse(breakpointsProvider.actionMakeBreakpointsEffective.isEnabled());
+
+		addMapping(trace, program);
+		waitForPass(() -> {
+			assertTrue(breakpointsProvider.actionMakeBreakpointsEffective.isEnabled());
+			assertEquals(1,
+				consolePlugin.getRowCount(DebuggerMakeBreakpointsEffectiveActionContext.class));
+		});
+
+		performAction(breakpointsProvider.actionMakeBreakpointsEffective);
+
+		waitForPass(() -> {
+			assertFalse(breakpointsProvider.actionMakeBreakpointsEffective.isEnabled());
+			assertEquals(0,
+				consolePlugin.getRowCount(DebuggerMakeBreakpointsEffectiveActionContext.class));
+		});
+	}
+
+	protected static <R> List<R> copyModelData(
+			RowWrappedEnumeratedColumnTableModel<?, ?, R, ?> model) {
+		synchronized (model) {
+			return List.copyOf(model.getModelData());
+		}
 	}
 
 	@Test
@@ -487,7 +534,7 @@ public class DebuggerBreakpointsProviderTest extends AbstractGhidraHeadedDebugge
 		// Because mapping service debounces, wait for breakpoints to be reconciled
 		LogicalBreakpointTableModel bptModel = breakpointsProvider.breakpointTableModel;
 		waitForPass(() -> {
-			List<LogicalBreakpointRow> data = bptModel.getModelData();
+			List<LogicalBreakpointRow> data = copyModelData(bptModel);
 			assertEquals(2, data.size());
 			LogicalBreakpointRow row1 = data.get(0);
 			LogicalBreakpointRow row2 = data.get(1);
@@ -510,7 +557,7 @@ public class DebuggerBreakpointsProviderTest extends AbstractGhidraHeadedDebugge
 			assertEquals(2, lb2.getTraceBreakpoints().size());
 		});
 
-		List<LogicalBreakpointRow> breakData = bptModel.getModelData();
+		List<LogicalBreakpointRow> breakData = copyModelData(bptModel);
 		List<BreakpointLocationRow> filtLocs =
 			breakpointsProvider.locationFilterPanel.getTableFilterModel().getModelData();
 

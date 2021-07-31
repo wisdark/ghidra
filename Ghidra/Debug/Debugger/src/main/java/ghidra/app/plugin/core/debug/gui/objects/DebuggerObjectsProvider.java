@@ -1169,11 +1169,11 @@ public class DebuggerObjectsProvider extends ComponentProviderAdapter
 	new ActionBuilder("Step Last", plugin.getName())
 		.keyBinding("ALT F8")
 		.toolBarGroup(DebuggerResources.GROUP_CONTROL, "C" + groupTargetIndex)
-		.toolBarIcon(AbstractStepFinishAction.ICON)
+		.toolBarIcon(AbstractStepLastAction.ICON)
 		.popupMenuPath("&Step Last")
 		.popupMenuGroup(DebuggerResources.GROUP_CONTROL, "C" + groupTargetIndex)
-		.popupMenuIcon(AbstractStepFinishAction.ICON)
-		.helpLocation(AbstractStepFinishAction.help(plugin))
+		.popupMenuIcon(AbstractStepLastAction.ICON)
+		.helpLocation(AbstractStepLastAction.help(plugin))
 		//.withContext(ObjectActionContext.class)
 		.enabledWhen(ctx -> 
 			isInstance(ctx, TargetSteppable.class) && isStopped(ctx))
@@ -1622,6 +1622,7 @@ public class DebuggerObjectsProvider extends ComponentProviderAdapter
 				if (visibleChange) {
 					container.propagateProvider(DebuggerObjectsProvider.this);
 					update(container);
+					getComponent().repaint();
 				}
 			}
 		}
@@ -1645,6 +1646,7 @@ public class DebuggerObjectsProvider extends ComponentProviderAdapter
 				if (visibleChange) {
 					container.propagateProvider(DebuggerObjectsProvider.this);
 					update(container);
+					getComponent().repaint();
 				}
 			}
 			if (parent != null && isAutorecord() &&

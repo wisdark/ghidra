@@ -74,6 +74,10 @@
 		                target="help/topics/DebuggerModelServicePlugin/DebuggerModelServicePlugin.html" />
 		    </tocdef>
 
+			<tocdef id="DebuggerConsolePlugin" text="Debug Console"
+					sortgroup="c1"
+					target="help/topics/DebuggerConsolePlugin/DebuggerConsolePlugin.html" />
+
 	        <tocdef id="DebuggerObjectsPlugin" text="Commands and Objects" 
 	        		sortgroup="d" 
 	                target="help/topics/DebuggerObjectsPlugin/DebuggerObjectsPlugin.html" />
@@ -89,6 +93,10 @@
 			<tocdef id="DebuggerTraceManagerServicePlugin" text="Trace Management"
 					sortgroup="g"
 					target="help/topics/DebuggerTraceManagerServicePlugin/DebuggerTraceManagerServicePlugin.html" />
+
+			<tocdef id="DebuggerEmulationServicePlugin" text="Emulation"
+			        sortgroup="g1"
+			        target="help/topics/DebuggerEmulationServicePlugin/DebuggerEmulationServicePlugin.html" />
 
 	        <tocdef id="DebuggerRegistersPlugin" text="Registers" 
 	        		sortgroup="h" 

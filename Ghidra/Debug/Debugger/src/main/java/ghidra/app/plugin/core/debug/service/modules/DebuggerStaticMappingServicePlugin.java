@@ -63,26 +63,25 @@ import ghidra.util.exception.CancelledException;
 import ghidra.util.exception.VersionException;
 import ghidra.util.task.TaskMonitor;
 
-@PluginInfo( //
-	shortDescription = "Debugger static mapping manager", //
-	description = "Track and manage static mappings (program-trace relocations)", //
-	category = PluginCategoryNames.DEBUGGER, //
-	packageName = DebuggerPluginPackage.NAME, //
-	status = PluginStatus.RELEASED, //
+@PluginInfo(
+	shortDescription = "Debugger static mapping manager",
+	description = "Track and manage static mappings (program-trace relocations)",
+	category = PluginCategoryNames.DEBUGGER,
+	packageName = DebuggerPluginPackage.NAME,
+	status = PluginStatus.RELEASED,
 	eventsConsumed = {
-		ProgramOpenedPluginEvent.class, //
-		ProgramClosedPluginEvent.class, //
-		TraceOpenedPluginEvent.class, // 
-		TraceClosedPluginEvent.class, //
-	}, //
-	servicesRequired = { //
-		ProgramManager.class, //
-		DebuggerTraceManagerService.class, //
-	}, //
-	servicesProvided = { //
-		DebuggerStaticMappingService.class, //
-	} // 
-)
+		ProgramOpenedPluginEvent.class,
+		ProgramClosedPluginEvent.class,
+		TraceOpenedPluginEvent.class,
+		TraceClosedPluginEvent.class,
+	},
+	servicesRequired = {
+		ProgramManager.class,
+		DebuggerTraceManagerService.class,
+	},
+	servicesProvided = {
+		DebuggerStaticMappingService.class,
+	})
 public class DebuggerStaticMappingServicePlugin extends Plugin
 		implements DebuggerStaticMappingService, DomainFolderChangeAdapter {
 
@@ -457,7 +456,7 @@ public class DebuggerStaticMappingServicePlugin extends Plugin
 		}
 
 		private void staticMappingAdded(TraceStaticMapping mapping) {
-			Msg.debug(this, "Trace Mapping added: " + mapping);
+			// Msg.debug(this, "Trace Mapping added: " + mapping);
 			synchronized (lock) {
 				MappingEntry me = new MappingEntry(mapping);
 				putOutboundAndInboundEntries(me);
@@ -904,6 +903,10 @@ public class DebuggerStaticMappingServicePlugin extends Plugin
 
 	private void traceOpened(Trace trace) {
 		synchronized (lock) {
+			if (trace.isClosed()) {
+				Msg.warn(this, "Got traceOpened for a close trace");
+				return;
+			}
 			InfoPerTrace newInfo = new InfoPerTrace(trace);
 			InfoPerTrace mustBeNull = trackedTraceInfo.put(trace, newInfo);
 			assert mustBeNull == null;
@@ -922,6 +925,10 @@ public class DebuggerStaticMappingServicePlugin extends Plugin
 	private void traceClosed(Trace trace) {
 		synchronized (lock) {
 			InfoPerTrace traceInfo = trackedTraceInfo.remove(trace);
+			if (traceInfo == null) {
+				Msg.warn(this, "Got traceClosed without/before traceOpened");
+				return;
+			}
 			traceInfo.dispose();
 			doAffectedByTraceClosed(trace);
 		}
@@ -1005,23 +1012,13 @@ public class DebuggerStaticMappingServicePlugin extends Plugin
 		for (ModuleMapEntry ent : entries) {
 			monitor.checkCanceled();
 			try {
-				addModuleMapping(ent.getModule(), ent.getModuleRange().getLength(),
-					ent.getProgram(), truncateExisting);
+				DebuggerStaticMappingUtils.addModuleMapping(ent.getModule(),
+					ent.getModuleRange().getLength(), ent.getProgram(), truncateExisting);
 			}
 			catch (Exception e) {
 				Msg.error(this, "Could not add mapping " + ent + ": " + e.getMessage());
 			}
 		}
-	}
-
-	@Override
-	public void addSectionMapping(TraceSection from, Program toProgram, MemoryBlock to,
-			boolean truncateExisting) throws TraceConflictedMappingException {
-		TraceLocation fromLoc = new DefaultTraceLocation(from.getTrace(), null,
-			from.getModule().getLifespan(), from.getStart());
-		ProgramLocation toLoc = new ProgramLocation(toProgram, to.getStart());
-		long length = Math.min(from.getRange().getLength(), to.getSize());
-		addMapping(fromLoc, toLoc, length, truncateExisting);
 	}
 
 	@Override
@@ -1048,8 +1045,8 @@ public class DebuggerStaticMappingServicePlugin extends Plugin
 		for (SectionMapEntry ent : entries) {
 			monitor.checkCanceled();
 			try {
-				addSectionMapping(ent.getSection(), ent.getProgram(), ent.getBlock(),
-					truncateExisting);
+				DebuggerStaticMappingUtils.addSectionMapping(ent.getSection(), ent.getProgram(),
+					ent.getBlock(), truncateExisting);
 			}
 			catch (Exception e) {
 				Msg.error(this, "Could not add mapping " + ent + ": " + e.getMessage());
@@ -1070,8 +1067,7 @@ public class DebuggerStaticMappingServicePlugin extends Plugin
 	}
 
 	protected <T> T noProject() {
-		Msg.warn(this, "The given program does not exist in any project");
-		return null;
+		return DebuggerStaticMappingUtils.noProject(this);
 	}
 
 	protected InfoPerTrace requireTrackedInfo(Trace trace) {
@@ -1118,7 +1114,7 @@ public class DebuggerStaticMappingServicePlugin extends Plugin
 
 	@Override
 	public ProgramLocation getStaticLocationFromDynamic(ProgramLocation loc) {
-		loc = traceManager.fixLocation(loc, true);
+		loc = ProgramLocationUtils.fixLocation(loc, true);
 		TraceProgramView view = (TraceProgramView) loc.getProgram();
 		Trace trace = view.getTrace();
 		TraceLocation tloc = new DefaultTraceLocation(trace, null,
