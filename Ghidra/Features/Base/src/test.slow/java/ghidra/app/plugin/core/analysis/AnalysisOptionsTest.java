@@ -48,7 +48,7 @@ public class AnalysisOptionsTest extends AbstractGhidraHeadedIntegrationTest {
 	private PluginTool tool;
 	private Program program;
 	private AnalysisOptionsDialog optionsDialog;
-	
+
 	@Before
 	public void setUp() throws Exception {
 		cleanUpStoredPreferences();
@@ -91,7 +91,7 @@ public class AnalysisOptionsTest extends AbstractGhidraHeadedIntegrationTest {
 		setAnalyzerEnabled("Stack", false);
 		setAnalyzerEnabled("Reference", false);
 		setAnalyzerEnabled("ASCII Strings", false);
-		
+
 		assertFalse(isAnalyzerEnabled("Stack"));
 		assertFalse(isAnalyzerEnabled("Reference"));
 		assertFalse(isAnalyzerEnabled("ASCII Strings"));
@@ -101,14 +101,17 @@ public class AnalysisOptionsTest extends AbstractGhidraHeadedIntegrationTest {
 		assertTrue(isAnalyzerEnabled("Stack"));
 		assertTrue(isAnalyzerEnabled("Reference"));
 		assertTrue(isAnalyzerEnabled("ASCII Strings"));
+
+		close(optionsDialog);
 	}
+
 	@Test
 	public void testDeselectAll() throws Exception {
 
 		setAnalyzerEnabled("Stack", true);
 		setAnalyzerEnabled("Reference", true);
-		setAnalyzerEnabled("ASCII Strings",true);
-		
+		setAnalyzerEnabled("ASCII Strings", true);
+
 		assertTrue(isAnalyzerEnabled("Stack"));
 		assertTrue(isAnalyzerEnabled("Reference"));
 		assertTrue(isAnalyzerEnabled("ASCII Strings"));
@@ -118,6 +121,8 @@ public class AnalysisOptionsTest extends AbstractGhidraHeadedIntegrationTest {
 		assertFalse(isAnalyzerEnabled("Stack"));
 		assertFalse(isAnalyzerEnabled("Reference"));
 		assertFalse(isAnalyzerEnabled("ASCII Strings"));
+
+		close(optionsDialog);
 	}
 
 	@Test
@@ -129,7 +134,7 @@ public class AnalysisOptionsTest extends AbstractGhidraHeadedIntegrationTest {
 		setAnalyzerEnabled("Stack", false);
 		setAnalyzerEnabled("Reference", false);
 		setAnalyzerEnabled("ASCII Strings", false);
-		
+
 		assertFalse(isAnalyzerEnabled("Stack"));
 		assertFalse(isAnalyzerEnabled("Reference"));
 		assertFalse(isAnalyzerEnabled("ASCII Strings"));
@@ -139,7 +144,10 @@ public class AnalysisOptionsTest extends AbstractGhidraHeadedIntegrationTest {
 		assertTrue(isAnalyzerEnabled("Stack"));
 		assertTrue(isAnalyzerEnabled("Reference"));
 		assertTrue(isAnalyzerEnabled("ASCII Strings"));
+
+		close(optionsDialog);
 	}
+
 	@Test
 	public void testSaveConfiguration() {
 		assertComboboxEquals("Current Program Options");
@@ -149,10 +157,12 @@ public class AnalysisOptionsTest extends AbstractGhidraHeadedIntegrationTest {
 
 		pressButtonByText(optionsDialog, "Save...", false);
 		saveConfig("foo");
-		
+
 		assertComboboxEquals("foo");
-		
+
+		close(optionsDialog);
 	}
+
 	@Test
 	public void testDeleteConfiguration() {
 		assertComboboxEquals("Current Program Options");
@@ -163,16 +173,18 @@ public class AnalysisOptionsTest extends AbstractGhidraHeadedIntegrationTest {
 		confirmDelete();
 
 		assertComboboxEquals("Current Program Options");
+
+		close(optionsDialog);
 	}
-	
-	@Test 
+
+	@Test
 	public void testSwitchCombo() {
 		createConfig("a", false, false, false);
 		createConfig("b", false, true, false);
 		createConfig("c", true, false, true);
 
 		assertComboboxEquals("c");
-		
+
 		assertTrue(isAnalyzerEnabled("Stack"));
 		assertFalse(isAnalyzerEnabled("Reference"));
 		assertTrue(isAnalyzerEnabled("ASCII Strings"));
@@ -187,9 +199,10 @@ public class AnalysisOptionsTest extends AbstractGhidraHeadedIntegrationTest {
 		assertTrue(isAnalyzerEnabled("Reference"));
 		assertFalse(isAnalyzerEnabled("ASCII Strings"));
 
+		close(optionsDialog);
 	}
-	
-	@Test 
+
+	@Test
 	public void testCancelDialogDoesntSaveChanges() {
 		assertComboboxEquals("Current Program Options");
 
@@ -200,19 +213,22 @@ public class AnalysisOptionsTest extends AbstractGhidraHeadedIntegrationTest {
 
 		setAnalyzerEnabled("Stack", false);
 		setAnalyzerEnabled("Reference", false);
-	
+
 		assertTrue(isAnalyzerEnabledInProgramOptions("Stack"));
 		assertTrue(isAnalyzerEnabledInProgramOptions("Reference"));
 		assertFalse(isAnalyzerEnabled("Stack"));
 		assertFalse(isAnalyzerEnabled("Reference"));
 
-		pressButtonByText(optionsDialog, "Cancel");
-		
+		pressButtonByText(optionsDialog, "Cancel", false);
+		OptionDialog yesNoDialog = waitForDialogComponent(OptionDialog.class);
+		pressButtonByText(yesNoDialog.getComponent(), "No");
+		waitForSwing();
+
 		assertTrue(isAnalyzerEnabledInProgramOptions("Stack"));
 		assertTrue(isAnalyzerEnabledInProgramOptions("Reference"));
 	}
-	
-	@Test 
+
+	@Test
 	public void testAnalyzeSavesChangesToProgram() {
 		assertComboboxEquals("Current Program Options");
 
@@ -223,14 +239,14 @@ public class AnalysisOptionsTest extends AbstractGhidraHeadedIntegrationTest {
 
 		setAnalyzerEnabled("Stack", false);
 		setAnalyzerEnabled("Reference", false);
-	
+
 		assertTrue(isAnalyzerEnabledInProgramOptions("Stack"));
 		assertTrue(isAnalyzerEnabledInProgramOptions("Reference"));
 		assertFalse(isAnalyzerEnabled("Stack"));
 		assertFalse(isAnalyzerEnabled("Reference"));
 
 		pressButtonByText(optionsDialog, "Analyze");
-		
+
 		waitForBusyTool(tool);
 
 		assertFalse(isAnalyzerEnabledInProgramOptions("Stack"));
@@ -245,24 +261,26 @@ public class AnalysisOptionsTest extends AbstractGhidraHeadedIntegrationTest {
 		setAnalyzerEnabled("Stack", stackOn);
 		setAnalyzerEnabled("Reference", refOn);
 		setAnalyzerEnabled("ASCII Strings", stringOn);
-	
+
 		pressButtonByText(optionsDialog, "Save...", false);
 		saveConfig(name);
-			
+
 	}
 
 	private void assertComboboxEquals(String name) {
 		AnalysisPanel panel = (AnalysisPanel) getInstanceField("panel", optionsDialog);
 		@SuppressWarnings("unchecked")
-		GhidraComboBox<Options> combo = (GhidraComboBox<Options>) getInstanceField("defaultOptionsCombo", panel);
-		assertEquals(name, ((Options)combo.getSelectedItem()).getName());
+		GhidraComboBox<Options> combo =
+			(GhidraComboBox<Options>) getInstanceField("optionsComboBox", panel);
+		assertEquals(name, ((Options) combo.getSelectedItem()).getName());
 	}
-	
+
 	private void setCombobox(String name) {
 		runSwing(() -> {
 			AnalysisPanel panel = (AnalysisPanel) getInstanceField("panel", optionsDialog);
 			@SuppressWarnings("unchecked")
-			GhidraComboBox<Options> combo = (GhidraComboBox<Options>) getInstanceField("defaultOptionsCombo", panel);
+			GhidraComboBox<Options> combo =
+				(GhidraComboBox<Options>) getInstanceField("optionsComboBox", panel);
 			ComboBoxModel<Options> model = combo.getModel();
 			for (int i = 0; i < model.getSize(); i++) {
 				Options elementAt = model.getElementAt(i);
@@ -280,8 +298,9 @@ public class AnalysisOptionsTest extends AbstractGhidraHeadedIntegrationTest {
 		runSwing(() -> dialog.setValue(name));
 		pressButtonByText(dialog, "OK");
 		waitForSwing();
-		
+
 	}
+
 	private void confirmDelete() {
 		OptionDialog dialog = waitForDialogComponent(OptionDialog.class);
 		pressButtonByText(dialog, "Yes");
@@ -293,11 +312,10 @@ public class AnalysisOptionsTest extends AbstractGhidraHeadedIntegrationTest {
 		performAction(action, false);
 		return waitForDialogComponent(AnalysisOptionsDialog.class);
 	}
-	
+
 	private void apply() {
 		pressButtonByText(optionsDialog, "Analyze");
 	}
-	
 
 	private boolean isAnalyzerEnabledInProgramOptions(String analyzerName) {
 		Options options = program.getOptions(Program.ANALYSIS_PROPERTIES);
@@ -324,15 +342,15 @@ public class AnalysisOptionsTest extends AbstractGhidraHeadedIntegrationTest {
 			}
 		});
 	}
-	
+
 	private boolean isAnalyzerEnabled(String name) {
 		TableModel model = getAnalyzerTableModel();
 		int analyzerRow = getRowForAnalyzer(name, model);
-		AtomicBoolean result = new AtomicBoolean(); 
+		AtomicBoolean result = new AtomicBoolean();
 		runSwing(new Runnable() {
 			@Override
 			public void run() {
-				result.set((Boolean)model.getValueAt(analyzerRow, 0));
+				result.set((Boolean) model.getValueAt(analyzerRow, 0));
 			}
 		});
 		return result.get();
@@ -363,4 +381,3 @@ public class AnalysisOptionsTest extends AbstractGhidraHeadedIntegrationTest {
 	}
 
 }
-
