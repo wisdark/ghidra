@@ -16,6 +16,8 @@
 package ghidra.app.plugin.core.debug.gui.pcode;
 
 import java.awt.*;
+import java.awt.font.FontRenderContext;
+import java.awt.geom.AffineTransform;
 import java.math.BigInteger;
 import java.util.*;
 import java.util.List;
@@ -52,10 +54,11 @@ import ghidra.pcode.exec.PcodeExecutorState;
 import ghidra.pcode.exec.PcodeFrame;
 import ghidra.program.model.data.DataType;
 import ghidra.program.model.lang.Language;
+import ghidra.program.model.listing.Instruction;
 import ghidra.program.model.pcode.PcodeOp;
 import ghidra.program.model.pcode.Varnode;
 import ghidra.trace.model.Trace;
-import ghidra.trace.model.time.TraceSchedule;
+import ghidra.trace.model.time.schedule.TraceSchedule;
 import ghidra.util.ColorUtils;
 import ghidra.util.HTMLUtilities;
 import ghidra.util.database.UndoableTransaction;
@@ -64,6 +67,8 @@ import ghidra.util.table.GhidraTableFilterPanel;
 import ghidra.util.table.column.AbstractGColumnRenderer;
 
 public class DebuggerPcodeStepperProvider extends ComponentProviderAdapter {
+	private static final FontRenderContext METRIC_FRC =
+		new FontRenderContext(new AffineTransform(), false, false);
 	private static final String BACKGROUND_COLOR = "Background Color";
 	private static final String ADDRESS_COLOR = "Address Color";
 	private static final String CONSTANT_COLOR = "Constant Color";
@@ -215,7 +220,10 @@ public class DebuggerPcodeStepperProvider extends ComponentProviderAdapter {
 			boolean isCurrent = counter == data.getRowModelIndex();
 			if (data.isSelected()) {
 				if (isCurrent) {
-					setBackground(ColorUtils.blend(counterColor, cursorColor, 0.5f));
+					Color blend = ColorUtils.blend(counterColor, cursorColor, 0.5f);
+					if (blend != null) {
+						setBackground(blend);
+					}
 				}
 				// else background is already set. Leave it alone
 			}
@@ -347,10 +355,11 @@ public class DebuggerPcodeStepperProvider extends ComponentProviderAdapter {
 
 	GhidraTable uniqueTable;
 	UniqueTableModel uniqueTableModel = new UniqueTableModel();
-	private GhidraTableFilterPanel<UniqueRow> uniqueFilterPanel;
+	GhidraTableFilterPanel<UniqueRow> uniqueFilterPanel;
 
 	GhidraTable pcodeTable;
 	PcodeTableModel pcodeTableModel = new PcodeTableModel();
+	JLabel instructionLabel;
 	// No filter panel on p-code
 
 	DockingAction actionStepBackward;
@@ -453,10 +462,18 @@ public class DebuggerPcodeStepperProvider extends ComponentProviderAdapter {
 		pcodeTableModel.fireTableDataChanged();
 	}
 
+	protected int computeSeqColWidth(JLabel renderer) {
+		Font font = renderer.getFont();
+		Insets insets = renderer.getBorder().getBorderInsets(renderer);
+		return (int) font.getStringBounds("00", METRIC_FRC).getWidth() + insets.left + insets.right;
+	}
+
 	protected void buildMainPanel() {
 		JPanel pcodePanel = new JPanel(new BorderLayout());
 		pcodeTable = new GhidraTable(pcodeTableModel);
 		pcodePanel.add(new JScrollPane(pcodeTable));
+		instructionLabel = new JLabel();
+		pcodePanel.add(instructionLabel, BorderLayout.NORTH);
 		mainPanel.setLeftComponent(pcodePanel);
 
 		JPanel uniquePanel = new JPanel(new BorderLayout());
@@ -479,9 +496,11 @@ public class DebuggerPcodeStepperProvider extends ComponentProviderAdapter {
 
 		TableColumnModel pcodeColModel = pcodeTable.getColumnModel();
 		TableColumn seqCol = pcodeColModel.getColumn(PcodeTableColumns.SEQUENCE.ordinal());
-		seqCol.setCellRenderer(new CounterBackgroundCellRenderer());
-		seqCol.setMinWidth(24);
-		seqCol.setMaxWidth(24);
+		CounterBackgroundCellRenderer seqColRenderer = new CounterBackgroundCellRenderer();
+		seqCol.setCellRenderer(seqColRenderer);
+		int seqColWidth = computeSeqColWidth(seqColRenderer);
+		seqCol.setMinWidth(seqColWidth);
+		seqCol.setMaxWidth(seqColWidth);
 		TableColumn codeCol = pcodeColModel.getColumn(PcodeTableColumns.CODE.ordinal());
 		codeCol.setCellRenderer(new PcodeCellRenderer());
 		//codeCol.setPreferredWidth(75);
@@ -507,11 +526,11 @@ public class DebuggerPcodeStepperProvider extends ComponentProviderAdapter {
 	}
 
 	protected void createActions() {
-		actionStepBackward = DebuggerResources.StepPcodeBackwardAction.builder(plugin)
+		actionStepBackward = DebuggerResources.EmulatePcodeBackwardAction.builder(plugin)
 				.enabledWhen(c -> current.getTrace() != null && current.getTime().pTickCount() != 0)
 				.onAction(c -> stepBackwardActivated())
 				.buildAndInstallLocal(this);
-		actionStepForward = DebuggerResources.StepPcodeForwardAction.builder(plugin)
+		actionStepForward = DebuggerResources.EmulatePcodeForwardAction.builder(plugin)
 				.enabledWhen(
 					c -> current.getThread() != null)
 				.onAction(c -> stepForwardActivated())
@@ -574,7 +593,8 @@ public class DebuggerPcodeStepperProvider extends ComponentProviderAdapter {
 		int index = frame.index();
 		List<PcodeRow> toAdd = frame.getCode()
 				.stream()
-				.map(op -> new OpPcodeRow(language, op, index == op.getSeqnum().getTime()))
+				.map(op -> new OpPcodeRow(language, op, index == op.getSeqnum().getTime(),
+					frame.getUseropNames()))
 				.collect(Collectors.toCollection(ArrayList::new));
 		if (frame.isBranch()) {
 			counter = toAdd.size();
@@ -620,6 +640,9 @@ public class DebuggerPcodeStepperProvider extends ComponentProviderAdapter {
 	}
 
 	protected void doLoadPcodeFrame() {
+		if (instructionLabel != null) {
+			instructionLabel.setText("(no instruction)");
+		}
 		if (emulationService == null) {
 			return;
 		}
@@ -659,6 +682,13 @@ public class DebuggerPcodeStepperProvider extends ComponentProviderAdapter {
 			 */
 			populateSingleton(EnumPcodeRow.DECODE);
 			return;
+		}
+		Instruction instruction = thread.getInstruction();
+		if (instruction == null) {
+			instructionLabel.setText("(no instruction)");
+		}
+		else {
+			instructionLabel.setText(instruction.toString());
 		}
 		PcodeFrame frame = thread.getFrame();
 		if (frame == null) {

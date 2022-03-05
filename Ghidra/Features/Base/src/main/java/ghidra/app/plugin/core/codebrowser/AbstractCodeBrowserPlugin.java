@@ -16,36 +16,28 @@
 package ghidra.app.plugin.core.codebrowser;
 
 import java.awt.Color;
-import java.awt.event.MouseAdapter;
-import java.awt.event.MouseEvent;
 import java.math.BigInteger;
-import java.util.*;
-import java.util.concurrent.atomic.AtomicBoolean;
+import java.util.ArrayList;
+import java.util.List;
 
 import javax.swing.ImageIcon;
 import javax.swing.JComponent;
 import javax.swing.event.ChangeEvent;
 import javax.swing.event.ChangeListener;
 
-import docking.ActionContext;
 import docking.action.DockingAction;
-import docking.action.MenuData;
-import docking.action.builder.ActionBuilder;
-import docking.tool.ToolConstants;
 import docking.widgets.fieldpanel.*;
 import docking.widgets.fieldpanel.field.Field;
 import docking.widgets.fieldpanel.support.FieldLocation;
 import docking.widgets.fieldpanel.support.FieldSelection;
 import ghidra.GhidraOptions;
-import ghidra.app.context.ListingActionContext;
 import ghidra.app.events.ProgramHighlightPluginEvent;
 import ghidra.app.events.ProgramSelectionPluginEvent;
 import ghidra.app.nav.Navigatable;
 import ghidra.app.plugin.core.codebrowser.hover.ListingHoverService;
-import ghidra.app.plugin.core.table.TableComponentProvider;
 import ghidra.app.services.*;
-import ghidra.app.util.*;
-import ghidra.app.util.query.TableService;
+import ghidra.app.util.HighlightProvider;
+import ghidra.app.util.ProgramDropProvider;
 import ghidra.app.util.viewer.field.ListingField;
 import ghidra.app.util.viewer.field.ListingTextField;
 import ghidra.app.util.viewer.format.*;
@@ -58,20 +50,16 @@ import ghidra.framework.options.*;
 import ghidra.framework.plugintool.Plugin;
 import ghidra.framework.plugintool.PluginTool;
 import ghidra.program.model.address.*;
-import ghidra.program.model.listing.*;
-import ghidra.program.model.symbol.Reference;
+import ghidra.program.model.listing.Data;
+import ghidra.program.model.listing.Program;
 import ghidra.program.util.ProgramLocation;
 import ghidra.program.util.ProgramSelection;
 import ghidra.util.*;
-import ghidra.util.datastruct.Accumulator;
-import ghidra.util.exception.CancelledException;
-import ghidra.util.table.*;
-import ghidra.util.task.TaskMonitor;
 import resources.ResourceManager;
 
 public abstract class AbstractCodeBrowserPlugin<P extends CodeViewerProvider> extends Plugin
-		implements CodeViewerService, CodeFormatService, OptionsChangeListener,
-		FormatModelListener, DomainObjectListener, CodeBrowserPluginInterface {
+		implements CodeViewerService, CodeFormatService, OptionsChangeListener, FormatModelListener,
+		DomainObjectListener, CodeBrowserPluginInterface {
 
 	private static final Color CURSOR_LINE_COLOR = GhidraOptions.DEFAULT_CURSOR_LINE_COLOR;
 	private static final String CURSOR_COLOR = "Cursor.Cursor Color - Focused";
@@ -94,10 +82,6 @@ public abstract class AbstractCodeBrowserPlugin<P extends CodeViewerProvider> ex
 	private MarkerSet currentHighlightMarkers;
 	private MarkerSet currentCursorMarkers;
 	private ChangeListener markerChangeListener;
-	private FocusingMouseListener focusingMouseListener = new FocusingMouseListener();
-
-	private DockingAction tableFromSelectionAction;
-	private DockingAction showXrefsAction;
 
 	private Color cursorHighlightColor;
 	private boolean isHighlightCursorLine;
@@ -122,50 +106,13 @@ public abstract class AbstractCodeBrowserPlugin<P extends CodeViewerProvider> ex
 		initOptions(fieldOptions);
 		initDisplayOptions(displayOptions);
 		initMiscellaneousOptions();
-		initActions();
 		displayOptions.addOptionsChangeListener(this);
 		fieldOptions.addOptionsChangeListener(this);
 		tool.setDefaultComponent(connectedProvider);
 		markerChangeListener = new MarkerChangeListener(connectedProvider);
-		createActions();
 	}
 
 	protected abstract P createProvider(FormatManager formatManager, boolean isConnected);
-
-	private void createActions() {
-		new ActionBuilder("Select All", getName())
-				.menuPath(ToolConstants.MENU_SELECTION, "&All in View")
-				.menuGroup("Select Group", "a")
-				.keyBinding("ctrl A")
-				.supportsDefaultToolContext(true)
-				.helpLocation(new HelpLocation(HelpTopics.SELECTION, "Select All"))
-				.withContext(CodeViewerActionContext.class)
-				.inWindow(ActionBuilder.When.CONTEXT_MATCHES)
-				.onAction(c -> ((CodeViewerProvider) c.getComponentProvider()).selectAll())
-				.buildAndInstall(tool);
-
-		new ActionBuilder("Clear Selection", getName())
-				.menuPath(ToolConstants.MENU_SELECTION, "&Clear Selection")
-				.menuGroup("Select Group", "b")
-				.supportsDefaultToolContext(true)
-				.helpLocation(new HelpLocation(HelpTopics.SELECTION, "Clear Selection"))
-				.withContext(CodeViewerActionContext.class)
-				.inWindow(ActionBuilder.When.CONTEXT_MATCHES)
-				.onAction(c -> ((CodeViewerProvider) c.getComponentProvider())
-						.setSelection(new ProgramSelection()))
-				.buildAndInstall(tool);
-
-		new ActionBuilder("Select Complement", getName())
-				.menuPath(ToolConstants.MENU_SELECTION, "&Complement")
-				.menuGroup("Select Group", "c")
-				.supportsDefaultToolContext(true)
-				.helpLocation(new HelpLocation(HelpTopics.SELECTION, "Select Complement"))
-				.withContext(CodeViewerActionContext.class)
-				.inWindow(ActionBuilder.When.CONTEXT_MATCHES)
-				.onAction(c -> ((CodeViewerProvider) c.getComponentProvider()).selectComplement())
-				.buildAndInstall(tool);
-
-	}
 
 	protected void viewChanged(AddressSetView addrSet) {
 		ProgramLocation currLoc = getCurrentLocation();
@@ -267,10 +214,6 @@ public abstract class AbstractCodeBrowserPlugin<P extends CodeViewerProvider> ex
 
 	@Override
 	public void serviceAdded(Class<?> interfaceClass, Object service) {
-		if (interfaceClass == TableService.class) {
-			tool.addAction(tableFromSelectionAction);
-			tool.addAction(showXrefsAction);
-		}
 		if (interfaceClass == ViewManagerService.class && viewManager == null) {
 			viewManager = (ViewManagerService) service;
 			viewChanged(viewManager.getCurrentView());
@@ -298,12 +241,6 @@ public abstract class AbstractCodeBrowserPlugin<P extends CodeViewerProvider> ex
 
 	@Override
 	public void serviceRemoved(Class<?> interfaceClass, Object service) {
-		if (interfaceClass == TableService.class) {
-			if (tool != null) {
-				tool.removeAction(tableFromSelectionAction);
-				tool.removeAction(showXrefsAction);
-			}
-		}
 		if ((service == viewManager) && (currentProgram != null)) {
 			viewManager = null;
 			viewChanged(currentProgram.getMemory());
@@ -329,36 +266,22 @@ public abstract class AbstractCodeBrowserPlugin<P extends CodeViewerProvider> ex
 
 	@Override
 	public void addOverviewProvider(OverviewProvider overviewProvider) {
-		JComponent component = overviewProvider.getComponent();
-
-		// just in case we get repeated calls
-		component.removeMouseListener(focusingMouseListener);
-		component.addMouseListener(focusingMouseListener);
-		connectedProvider.getListingPanel().addOverviewProvider(overviewProvider);
+		connectedProvider.addOverviewProvider(overviewProvider);
 	}
 
 	@Override
 	public void addMarginProvider(MarginProvider marginProvider) {
-		JComponent component = marginProvider.getComponent();
-
-		// just in case we get repeated calls
-		component.removeMouseListener(focusingMouseListener);
-		component.addMouseListener(focusingMouseListener);
-		connectedProvider.getListingPanel().addMarginProvider(marginProvider);
+		connectedProvider.addMarginProvider(marginProvider);
 	}
 
 	@Override
 	public void removeOverviewProvider(OverviewProvider overviewProvider) {
-		JComponent component = overviewProvider.getComponent();
-		component.removeMouseListener(focusingMouseListener);
-		connectedProvider.getListingPanel().removeOverviewProvider(overviewProvider);
+		connectedProvider.removeOverviewProvider(overviewProvider);
 	}
 
 	@Override
 	public void removeMarginProvider(MarginProvider marginProvider) {
-		JComponent component = marginProvider.getComponent();
-		component.removeMouseListener(focusingMouseListener);
-		connectedProvider.getListingPanel().removeMarginProvider(marginProvider);
+		connectedProvider.removeMarginProvider(marginProvider);
 	}
 
 	@Override
@@ -702,81 +625,6 @@ public abstract class AbstractCodeBrowserPlugin<P extends CodeViewerProvider> ex
 
 	}
 
-	public void initActions() {
-
-		// note: these actions gets added later when the TableService is added
-
-		tableFromSelectionAction = new DockingAction("Create Table From Selection", getName()) {
-			ImageIcon markerIcon = ResourceManager.loadImage("images/searchm_obj.gif");
-
-			@Override
-			public void actionPerformed(ActionContext context) {
-				Listing listing = currentProgram.getListing();
-				ProgramSelection selection = connectedProvider.getSelection();
-				CodeUnitIterator codeUnits = listing.getCodeUnits(selection, true);
-				TableService tableService = tool.getService(TableService.class);
-				if (!codeUnits.hasNext()) {
-					tool.setStatusInfo(
-						"Unable to create table from selection: no " + "code units in selection");
-					return;
-				}
-
-				GhidraProgramTableModel<Address> model = createTableModel(codeUnits, selection);
-				String title = "Selection Table";
-				TableComponentProvider<Address> tableProvider =
-					tableService.showTableWithMarkers(title + " " + model.getName(), "Selection",
-						model, PluginConstants.SEARCH_HIGHLIGHT_COLOR, markerIcon, title, null);
-				tableProvider.installRemoveItemsAction();
-			}
-
-			@Override
-			public boolean isEnabledForContext(ActionContext context) {
-				ProgramSelection programSelection = connectedProvider.getSelection();
-				return programSelection != null && !programSelection.isEmpty();
-			}
-		};
-
-		tableFromSelectionAction.setEnabled(false);
-		tableFromSelectionAction.setMenuBarData(new MenuData(
-			new String[] { ToolConstants.MENU_SELECTION, "Create Table From Selection" }, null,
-			"SelectUtils"));
-		tableFromSelectionAction
-				.setHelpLocation(new HelpLocation("CodeBrowserPlugin", "Selection_Table"));
-
-		showXrefsAction = new ActionBuilder("Show Xrefs", getName())
-				.description("Show the Xrefs to the code unit containing the cursor")
-				.validContextWhen(context -> context instanceof ListingActionContext)
-				.onAction(context -> showXrefs(context))
-				.build();
-	}
-
-	private void showXrefs(ActionContext context) {
-
-		TableService service = tool.getService(TableService.class);
-		if (service == null) {
-			return;
-		}
-
-		ListingActionContext lac = (ListingActionContext) context;
-		ProgramLocation location = lac.getLocation();
-		if (location == null) {
-			return; // not sure if this can happen
-		}
-
-		Set<Reference> refs = XReferenceUtil.getAllXrefs(location);
-		XReferenceUtil.showAllXrefs(connectedProvider, tool, service, location, refs);
-	}
-
-	private GhidraProgramTableModel<Address> createTableModel(CodeUnitIterator iterator,
-			ProgramSelection selection) {
-
-		CodeUnitFromSelectionTableModelLoader loader =
-			new CodeUnitFromSelectionTableModelLoader(iterator, selection);
-
-		return new CustomLoadingAddressTableModel(" - from " + selection.getMinAddress(), tool,
-			currentProgram, loader, null, true);
-	}
-
 	@Override
 	public void updateDisplay() {
 		connectedProvider.getListingPanel().updateDisplay(false);
@@ -802,7 +650,7 @@ public abstract class AbstractCodeBrowserPlugin<P extends CodeViewerProvider> ex
 
 	/**
 	 * Positions the cursor to the given location
-	 * 
+	 *
 	 * @param address the address to goto
 	 * @param fieldName the name of the field to
 	 * @param row the row within the given field
@@ -815,7 +663,7 @@ public abstract class AbstractCodeBrowserPlugin<P extends CodeViewerProvider> ex
 
 	/**
 	 * Positions the cursor to the given location
-	 * 
+	 *
 	 * @param addr the address to goto
 	 * @param fieldName the name of the field to
 	 * @param occurrence specifies the which occurrence for multiple fields of same type
@@ -841,9 +689,7 @@ public abstract class AbstractCodeBrowserPlugin<P extends CodeViewerProvider> ex
 	public boolean goToField(Address a, String fieldName, int occurrence, int row, int col,
 			boolean scroll) {
 
-		boolean result = SystemUtilities
-				.runSwingNow(() -> doGoToField(a, fieldName, occurrence, row, col, scroll));
-		return result;
+		return Swing.runNow(() -> doGoToField(a, fieldName, occurrence, row, col, scroll));
 	}
 
 	private boolean doGoToField(Address a, String fieldName, int occurrence, int row, int col,
@@ -932,12 +778,8 @@ public abstract class AbstractCodeBrowserPlugin<P extends CodeViewerProvider> ex
 	@Override
 	public boolean goTo(ProgramLocation location, boolean centerOnScreen) {
 
-		AtomicBoolean didGoTo = new AtomicBoolean();
-		SystemUtilities.runSwingNow(() -> {
-			boolean success = connectedProvider.getListingPanel().goTo(location, centerOnScreen);
-			didGoTo.set(success);
-		});
-		return didGoTo.get();
+		return Swing
+				.runNow(() -> connectedProvider.getListingPanel().goTo(location, centerOnScreen));
 	}
 
 	@Override
@@ -1066,40 +908,6 @@ public abstract class AbstractCodeBrowserPlugin<P extends CodeViewerProvider> ex
 		@Override
 		public void stateChanged(ChangeEvent e) {
 			fieldPanel.repaint();
-		}
-	}
-
-	private class FocusingMouseListener extends MouseAdapter {
-		@Override
-		public void mousePressed(MouseEvent e) {
-			connectedProvider.getListingPanel().getFieldPanel().requestFocus();
-		}
-	}
-
-	private class CodeUnitFromSelectionTableModelLoader implements TableModelLoader<Address> {
-
-		private CodeUnitIterator iterator;
-		private ProgramSelection selection;
-
-		CodeUnitFromSelectionTableModelLoader(CodeUnitIterator iterator,
-				ProgramSelection selection) {
-			this.iterator = iterator;
-			this.selection = selection;
-		}
-
-		@Override
-		public void load(Accumulator<Address> accumulator, TaskMonitor monitor)
-				throws CancelledException {
-
-			long size = selection.getNumAddresses();
-			monitor.initialize(size);
-
-			while (iterator.hasNext()) {
-				monitor.checkCanceled();
-				CodeUnit cu = iterator.next();
-				accumulator.add(cu.getMinAddress());
-				monitor.incrementProgress(cu.getLength());
-			}
 		}
 	}
 }

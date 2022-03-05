@@ -27,14 +27,17 @@ import javax.swing.JLabel;
 import javax.swing.JTextField;
 
 import org.junit.Test;
+import org.junit.experimental.categories.Category;
 
 import generic.Unique;
+import generic.test.category.NightlyCategory;
 import ghidra.app.plugin.core.debug.event.ModelObjectFocusedPluginEvent;
 import ghidra.app.plugin.core.debug.gui.AbstractGhidraHeadedDebuggerGUITest;
 import ghidra.app.plugin.core.debug.gui.DebuggerResources.AbstractConnectAction;
 import ghidra.app.plugin.core.debug.service.model.DebuggerConnectDialog.FactoryEntry;
 import ghidra.app.plugin.core.debug.service.model.TestDebuggerProgramLaunchOpinion.TestDebuggerProgramLaunchOffer;
 import ghidra.app.plugin.core.debug.service.model.launch.DebuggerProgramLaunchOffer;
+import ghidra.app.services.ActionSource;
 import ghidra.app.services.TraceRecorder;
 import ghidra.async.AsyncPairingQueue;
 import ghidra.dbg.DebuggerModelFactory;
@@ -53,10 +56,11 @@ import mockit.VerificationsInOrder;
 
 /**
  * TODO: Cover the error cases, and cases where {@code null} is expected
- * 
+ *
  * <p>
  * TODO: Cover cases where multiple recorders are present
  */
+@Category(NightlyCategory.class)
 public class DebuggerModelServiceTest extends AbstractGhidraHeadedDebuggerGUITest
 		implements DebuggerModelTestUtils {
 	protected static final long TIMEOUT_MILLIS =
@@ -67,7 +71,7 @@ public class DebuggerModelServiceTest extends AbstractGhidraHeadedDebuggerGUITes
 	 * CollectionChangeListener.of() if I try to mock one of those or a subclass directly. I'm
 	 * guessing the version we're using (1.44 as of this writing) is utterly ignorant of static
 	 * interface methods. What was the latest version of Java at the time?
-	 * 
+	 *
 	 * <p>
 	 * TODO: Check if a later version fixes this issue. If so, consider upgrading. If not, submit an
 	 * issue.
@@ -210,7 +214,7 @@ public class DebuggerModelServiceTest extends AbstractGhidraHeadedDebuggerGUITes
 
 		assertEquals(Set.of(), Set.copyOf(modelService.getTraceRecorders()));
 		TraceRecorder recorder = modelService.recordTarget(mb.testProcess1,
-			new TestDebuggerTargetTraceMapper(mb.testProcess1));
+			createTargetTraceMapper(mb.testProcess1), ActionSource.AUTOMATIC);
 
 		assertEquals(Set.of(recorder), Set.copyOf(modelService.getTraceRecorders()));
 	}
@@ -225,7 +229,7 @@ public class DebuggerModelServiceTest extends AbstractGhidraHeadedDebuggerGUITes
 			new CollectionChangeDelegateWrapper<>(recorderChangeListener);
 		modelService.addTraceRecordersChangedListener(wrapper);
 		TraceRecorder recorder = modelService.recordTarget(mb.testProcess1,
-			new TestDebuggerTargetTraceMapper(mb.testProcess1));
+			createTargetTraceMapper(mb.testProcess1), ActionSource.AUTOMATIC);
 
 		new VerificationsInOrder() {
 			{
@@ -240,7 +244,7 @@ public class DebuggerModelServiceTest extends AbstractGhidraHeadedDebuggerGUITes
 		mb.createTestProcessesAndThreads();
 
 		TraceRecorder recorder = modelService.recordTarget(mb.testProcess1,
-			new TestDebuggerTargetTraceMapper(mb.testProcess1));
+			createTargetTraceMapper(mb.testProcess1), ActionSource.AUTOMATIC);
 		// Strong ref
 		CollectionChangeDelegateWrapper<TraceRecorder> wrapper =
 			new CollectionChangeDelegateWrapper<>(recorderChangeListener);
@@ -262,7 +266,7 @@ public class DebuggerModelServiceTest extends AbstractGhidraHeadedDebuggerGUITes
 		mb.createTestProcessesAndThreads();
 
 		TraceRecorder recorder = modelService.recordTarget(mb.testProcess1,
-			new TestDebuggerTargetTraceMapper(mb.testProcess1));
+			createTargetTraceMapper(mb.testProcess1), ActionSource.AUTOMATIC);
 		assertNotNull(recorder);
 		waitOn(recorder.init()); // Already initializing, just wait for it to complete
 
@@ -278,7 +282,7 @@ public class DebuggerModelServiceTest extends AbstractGhidraHeadedDebuggerGUITes
 		mb.createTestProcessesAndThreads();
 
 		modelService.recordTargetAndActivateTrace(mb.testProcess1,
-			new TestDebuggerTargetTraceMapper(mb.testProcess1));
+			createTargetTraceMapper(mb.testProcess1));
 		waitForSwing();
 
 		Trace trace = traceManager.getCurrentTrace();
@@ -287,7 +291,7 @@ public class DebuggerModelServiceTest extends AbstractGhidraHeadedDebuggerGUITes
 		traceManager.closeTrace(trace);
 		waitOn(mb.testModel.close());
 		waitForPass(() -> {
-			assertEquals(List.of(), trace.getConsumerList());
+			assertEquals(List.of(tb), trace.getConsumerList());
 		});
 	}
 
@@ -297,7 +301,7 @@ public class DebuggerModelServiceTest extends AbstractGhidraHeadedDebuggerGUITes
 		mb.createTestProcessesAndThreads();
 
 		TraceRecorder recorder = modelService.recordTarget(mb.testProcess1,
-			new TestDebuggerTargetTraceMapper(mb.testProcess1));
+			createTargetTraceMapper(mb.testProcess1), ActionSource.AUTOMATIC);
 
 		assertEquals(recorder, modelService.getRecorder(mb.testProcess1));
 	}
@@ -308,7 +312,7 @@ public class DebuggerModelServiceTest extends AbstractGhidraHeadedDebuggerGUITes
 		mb.createTestProcessesAndThreads();
 
 		TraceRecorder recorder = modelService.recordTarget(mb.testProcess1,
-			new TestDebuggerTargetTraceMapper(mb.testProcess1));
+			createTargetTraceMapper(mb.testProcess1), ActionSource.AUTOMATIC);
 
 		assertEquals(recorder, modelService.getRecorder(recorder.getTrace()));
 	}
@@ -319,7 +323,7 @@ public class DebuggerModelServiceTest extends AbstractGhidraHeadedDebuggerGUITes
 		mb.createTestProcessesAndThreads();
 
 		TraceRecorder recorder = modelService.recordTarget(mb.testProcess1,
-			new TestDebuggerTargetTraceMapper(mb.testProcess1));
+			createTargetTraceMapper(mb.testProcess1), ActionSource.AUTOMATIC);
 
 		assertEquals(mb.testProcess1, modelService.getTarget(recorder.getTrace()));
 	}
@@ -330,7 +334,7 @@ public class DebuggerModelServiceTest extends AbstractGhidraHeadedDebuggerGUITes
 		mb.createTestProcessesAndThreads();
 
 		TraceRecorder recorder = modelService.recordTarget(mb.testProcess1,
-			new TestDebuggerTargetTraceMapper(mb.testProcess1));
+			createTargetTraceMapper(mb.testProcess1), ActionSource.AUTOMATIC);
 
 		assertEquals(recorder.getTrace(), modelService.getTrace(mb.testProcess1));
 	}
@@ -341,7 +345,7 @@ public class DebuggerModelServiceTest extends AbstractGhidraHeadedDebuggerGUITes
 		mb.createTestProcessesAndThreads();
 
 		TraceRecorder recorder = modelService.recordTarget(mb.testProcess1,
-			new TestDebuggerTargetTraceMapper(mb.testProcess1));
+			createTargetTraceMapper(mb.testProcess1), ActionSource.AUTOMATIC);
 
 		// The most complicated case, lest I want another dimension in a cross product
 		mb.createTestThreadStacksAndFramesHaveRegisterBanks();
@@ -369,8 +373,8 @@ public class DebuggerModelServiceTest extends AbstractGhidraHeadedDebuggerGUITes
 
 		preRec.run();
 
-		modelService.recordTarget(mb.testProcess1,
-			new TestDebuggerTargetTraceMapper(mb.testProcess1));
+		modelService.recordTarget(mb.testProcess1, createTargetTraceMapper(mb.testProcess1),
+			ActionSource.AUTOMATIC);
 
 		postRec.run();
 
@@ -416,8 +420,8 @@ public class DebuggerModelServiceTest extends AbstractGhidraHeadedDebuggerGUITes
 		createTestModel();
 		mb.createTestProcessesAndThreads();
 
-		modelService.recordTarget(mb.testProcess1,
-			new TestDebuggerTargetTraceMapper(mb.testProcess1));
+		modelService.recordTarget(mb.testProcess1, createTargetTraceMapper(mb.testProcess1),
+			ActionSource.AUTOMATIC);
 
 		// The most complicated case, lest I want another dimension in a cross product
 		mb.createTestThreadStacksAndFramesHaveRegisterBanks();
@@ -436,9 +440,9 @@ public class DebuggerModelServiceTest extends AbstractGhidraHeadedDebuggerGUITes
 
 		// NOTE: getTargetFocus assumes the target is being recorded
 		modelService.recordTarget(mb.testProcess1,
-			new TestDebuggerTargetTraceMapper(mb.testProcess1));
+			createTargetTraceMapper(mb.testProcess1), ActionSource.AUTOMATIC);
 		modelService.recordTarget(mb.testProcess3,
-			new TestDebuggerTargetTraceMapper(mb.testProcess3));
+			createTargetTraceMapper(mb.testProcess3), ActionSource.AUTOMATIC);
 
 		assertNull(modelService.getTargetFocus(mb.testProcess1));
 		assertNull(modelService.getTargetFocus(mb.testProcess3));
@@ -582,8 +586,7 @@ public class DebuggerModelServiceTest extends AbstractGhidraHeadedDebuggerGUITes
 	public void testRecordBestOfferUnrecognized() throws Exception {
 		createTestModel();
 		mb.testModel.session.environment.changeAttributes(List.of(),
-			Map.of(TargetEnvironment.ARCH_ATTRIBUTE_NAME, "test-bogus-arch"),
-			"Testing");
+			Map.of(TargetEnvironment.ARCH_ATTRIBUTE_NAME, "test-bogus-arch"), "Testing");
 		mb.createTestProcessesAndThreads();
 
 		modelService.recordTargetBestOffer(mb.testProcess1);
@@ -609,8 +612,7 @@ public class DebuggerModelServiceTest extends AbstractGhidraHeadedDebuggerGUITes
 	public void testRecordPromptOffersUnrecognized() throws Exception {
 		createTestModel();
 		mb.testModel.session.environment.changeAttributes(List.of(),
-			Map.of(TargetEnvironment.ARCH_ATTRIBUTE_NAME, "test-bogus-arch"),
-			"Testing");
+			Map.of(TargetEnvironment.ARCH_ATTRIBUTE_NAME, "test-bogus-arch"), "Testing");
 		mb.createTestProcessesAndThreads();
 
 		runSwingLater(() -> modelService.recordTargetPromptOffers(mb.testProcess1));

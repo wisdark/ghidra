@@ -840,13 +840,15 @@ public class ProgramDB extends DomainObjectAdapterDB implements Program, ChangeM
 			((ProgramDBChangeSet) changeSet).dataTypeChanged(dataTypeID);
 		}
 		changed = true;
-		fireEvent(new ProgramChangeRecord(type, null, null, null, oldValue, newValue));
 		try {
-			managers[SYMBOL_MGR].invalidateCache(true);
+			managers[SYMBOL_MGR].invalidateCache(true); // needed for function variable/param invalidation
+			managers[FUNCTION_MGR].invalidateCache(true); // needed for auto-param invalidation
+			managers[CODE_MGR].invalidateCache(true); // needed for data invalidation
 		}
 		catch (IOException e) {
 			dbError(e);
 		}
+		fireEvent(new ProgramChangeRecord(type, null, null, null, oldValue, newValue));
 	}
 
 	/**
@@ -2051,6 +2053,7 @@ public class ProgramDB extends DomainObjectAdapterDB implements Program, ChangeM
 			setEventsEnabled(false);
 			try {
 				boolean redisassemblyRequired = true;
+				LanguageID oldLanguageId = languageID;
 				int oldLanguageVersion = languageVersion;
 				int oldLanguageMinorVersion = languageMinorVersion;
 				if (translator != null) {
@@ -2079,6 +2082,12 @@ public class ProgramDB extends DomainObjectAdapterDB implements Program, ChangeM
 				if (newCompilerSpecID != null) {
 					compilerSpec = ProgramCompilerSpec.getProgramCompilerSpec(this,
 						language.getCompilerSpecByID(newCompilerSpecID));
+					if (!oldLanguageId.equals(languageID) ||
+						!compilerSpecID.equals(newCompilerSpecID)) {
+						if (compilerSpec instanceof ProgramCompilerSpec) {
+							((ProgramCompilerSpec) compilerSpec).resetProgramOptions(monitor);
+						}
+					}
 				}
 				compilerSpecID = compilerSpec.getCompilerSpecID();
 				languageVersion = language.getVersion();
