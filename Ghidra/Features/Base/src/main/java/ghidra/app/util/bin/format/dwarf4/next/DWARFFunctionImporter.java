@@ -182,11 +182,12 @@ public class DWARFFunctionImporter {
 			return true;
 		}
 
-		// fetch the low_pc attribute directly instead of calling diea.getLowPc() to avoid
-		// any fixups applied by lower level code
+		long lowPC = diea.getLowPC(0); // adjusted by program base addr fixup
 		DWARFNumericAttribute attr =
 			diea.getAttribute(DWARFAttribute.DW_AT_low_pc, DWARFNumericAttribute.class);
-		if (attr != null && attr.getUnsignedValue() == 0) {
+		if (attr != null && attr.getUnsignedValue() == 0 && lowPC != 0) {
+			// don't process this func if its raw lowpc is 0, with the exception of a binary (a .o) 
+			// that starts at 0 and has a function at 0
 			return true;
 		}
 
@@ -976,7 +977,7 @@ public class DWARFFunctionImporter {
 			}
 			return result;
 		}
-		catch (CodeUnitInsertionException | DataTypeConflictException e) {
+		catch (CodeUnitInsertionException e) {
 			Msg.error(this, "Error creating data object at " + address, e);
 		}
 		return null;

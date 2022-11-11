@@ -18,11 +18,10 @@ package ghidra.app.plugin.core.debug.service.modules;
 import java.net.URL;
 import java.util.*;
 import java.util.Map.Entry;
+import java.util.concurrent.CompletableFuture;
 import java.util.stream.Collectors;
 
 import org.apache.commons.lang3.ArrayUtils;
-
-import com.google.common.collect.Range;
 
 import ghidra.app.events.ProgramClosedPluginEvent;
 import ghidra.app.events.ProgramOpenedPluginEvent;
@@ -95,13 +94,12 @@ public class DebuggerStaticMappingServicePlugin extends Plugin
 		}
 
 		public Address addOrMax(Address start, long length) {
-			try {
-				return start.addNoWrap(length);
-			}
-			catch (AddressOverflowException e) {
-				Msg.warn(this, "Mapping entry cause overflow in static address space");
+			Address result = start.addWrapSpace(length);
+			if (result.compareTo(start) < 0) {
+				Msg.warn(this, "Mapping entry caused overflow in static address space");
 				return start.getAddressSpace().getMaxAddress();
 			}
+			return result;
 		}
 
 		public boolean programOpened(Program opened) {
@@ -176,7 +174,7 @@ public class DebuggerStaticMappingServicePlugin extends Plugin
 		protected Address mapTraceAddressToProgram(Address address) {
 			assert isInTraceRange(address, null);
 			long offset = address.subtract(mapping.getMinTraceAddress());
-			return staticRange.getMinAddress().add(offset);
+			return staticRange.getMinAddress().addWrapSpace(offset);
 		}
 
 		public ProgramLocation mapTraceAddressToProgramLocation(Address address) {
@@ -197,7 +195,7 @@ public class DebuggerStaticMappingServicePlugin extends Plugin
 		protected Address mapProgramAddressToTrace(Address address) {
 			assert isInProgramRange(address);
 			long offset = address.subtract(staticRange.getMinAddress());
-			return mapping.getMinTraceAddress().add(offset);
+			return mapping.getMinTraceAddress().addWrapSpace(offset);
 		}
 
 		protected TraceLocation mapProgramAddressToTraceLocation(Address address) {
@@ -344,7 +342,7 @@ public class DebuggerStaticMappingServicePlugin extends Plugin
 			return result;
 		}
 
-		public ProgramLocation getOpenMappedLocations(Address address, Range<Long> span) {
+		public ProgramLocation getOpenMappedLocations(Address address, Lifespan span) {
 			TraceAddressSnapRange at = new ImmutableTraceAddressSnapRange(address, span);
 			for (Entry<TraceAddressSnapRange, MappingEntry> out : outbound.entrySet()) {
 				if (out.getKey().intersects(at)) {
@@ -357,7 +355,7 @@ public class DebuggerStaticMappingServicePlugin extends Plugin
 			return null;
 		}
 
-		protected void collectOpenMappedPrograms(AddressRange rng, Range<Long> span,
+		protected void collectOpenMappedPrograms(AddressRange rng, Lifespan span,
 				Map<Program, Collection<MappedAddressRange>> result) {
 			TraceAddressSnapRange tatr = new ImmutableTraceAddressSnapRange(rng, span);
 			for (Entry<TraceAddressSnapRange, MappingEntry> out : outbound.entrySet()) {
@@ -376,7 +374,7 @@ public class DebuggerStaticMappingServicePlugin extends Plugin
 		}
 
 		public Map<Program, Collection<MappedAddressRange>> getOpenMappedViews(AddressSetView set,
-				Range<Long> span) {
+				Lifespan span) {
 			Map<Program, Collection<MappedAddressRange>> result = new HashMap<>();
 			for (AddressRange rng : set) {
 				collectOpenMappedPrograms(rng, span, result);
@@ -384,7 +382,7 @@ public class DebuggerStaticMappingServicePlugin extends Plugin
 			return Collections.unmodifiableMap(result);
 		}
 
-		protected void collectMappedProgramURLsInView(AddressRange rng, Range<Long> span,
+		protected void collectMappedProgramURLsInView(AddressRange rng, Lifespan span,
 				Set<URL> result) {
 			TraceAddressSnapRange tatr = new ImmutableTraceAddressSnapRange(rng, span);
 			for (Entry<TraceAddressSnapRange, MappingEntry> out : outbound.entrySet()) {
@@ -396,7 +394,7 @@ public class DebuggerStaticMappingServicePlugin extends Plugin
 			}
 		}
 
-		public Set<URL> getMappedProgramURLsInView(AddressSetView set, Range<Long> span) {
+		public Set<URL> getMappedProgramURLsInView(AddressSetView set, Lifespan span) {
 			Set<URL> result = new HashSet<>();
 			for (AddressRange rng : set) {
 				collectMappedProgramURLsInView(rng, span, result);
@@ -598,6 +596,11 @@ public class DebuggerStaticMappingServicePlugin extends Plugin
 	}
 
 	@Override
+	public CompletableFuture<Void> changesSettled() {
+		return changeDebouncer.stable();
+	}
+
+	@Override
 	public void processEvent(PluginEvent event) {
 		if (event instanceof ProgramOpenedPluginEvent) {
 			ProgramOpenedPluginEvent openedEvt = (ProgramOpenedPluginEvent) event;
@@ -725,7 +728,7 @@ public class DebuggerStaticMappingServicePlugin extends Plugin
 	public void addMapping(TraceLocation from, ProgramLocation to, long length,
 			boolean truncateExisting) throws TraceConflictedMappingException {
 		try (UndoableTransaction tid =
-			UndoableTransaction.start(from.getTrace(), "Add mapping", true)) {
+			UndoableTransaction.start(from.getTrace(), "Add mapping")) {
 			DebuggerStaticMappingUtils.addMapping(from, to, length, truncateExisting);
 		}
 	}
@@ -734,7 +737,7 @@ public class DebuggerStaticMappingServicePlugin extends Plugin
 	public void addMapping(MapEntry<?, ?> entry, boolean truncateExisting)
 			throws TraceConflictedMappingException {
 		try (UndoableTransaction tid =
-			UndoableTransaction.start(entry.getFromTrace(), "Add mapping", true)) {
+			UndoableTransaction.start(entry.getFromTrace(), "Add mapping")) {
 			DebuggerStaticMappingUtils.addMapping(entry, truncateExisting);
 		}
 	}
@@ -746,8 +749,7 @@ public class DebuggerStaticMappingServicePlugin extends Plugin
 			entries.stream().collect(Collectors.groupingBy(ent -> ent.getFromTrace()));
 		for (Map.Entry<Trace, List<MapEntry<?, ?>>> ent : byTrace.entrySet()) {
 			Trace trace = ent.getKey();
-			try (UndoableTransaction tid =
-				UndoableTransaction.start(trace, description, true)) {
+			try (UndoableTransaction tid = UndoableTransaction.start(trace, description)) {
 				doAddMappings(trace, ent.getValue(), monitor, truncateExisting);
 			}
 		}
@@ -768,10 +770,10 @@ public class DebuggerStaticMappingServicePlugin extends Plugin
 	}
 
 	@Override
-	public void addIdentityMapping(Trace from, Program toProgram, Range<Long> lifespan,
+	public void addIdentityMapping(Trace from, Program toProgram, Lifespan lifespan,
 			boolean truncateExisting) {
 		try (UndoableTransaction tid =
-			UndoableTransaction.start(from, "Add identity mappings", true)) {
+			UndoableTransaction.start(from, "Add identity mappings")) {
 			DebuggerStaticMappingUtils.addIdentityMapping(from, toProgram, lifespan,
 				truncateExisting);
 		}
@@ -864,7 +866,7 @@ public class DebuggerStaticMappingServicePlugin extends Plugin
 			TraceProgramView view = (TraceProgramView) loc.getProgram();
 			Trace trace = view.getTrace();
 			TraceLocation tloc = new DefaultTraceLocation(trace, null,
-				Range.singleton(getNonScratchSnap(view)), loc.getByteAddress());
+				Lifespan.at(getNonScratchSnap(view)), loc.getByteAddress());
 			ProgramLocation mapped = getOpenMappedLocation(tloc);
 			if (mapped == null) {
 				return null;
@@ -917,7 +919,7 @@ public class DebuggerStaticMappingServicePlugin extends Plugin
 			if (info == null) {
 				return null;
 			}
-			return info.getOpenMappedViews(set, Range.singleton(snap));
+			return info.getOpenMappedViews(set, Lifespan.at(snap));
 		}
 	}
 
@@ -927,7 +929,7 @@ public class DebuggerStaticMappingServicePlugin extends Plugin
 		synchronized (lock) {
 			InfoPerProgram info = requireTrackedInfo(program);
 			if (info == null) {
-				return null;
+				return Map.of();
 			}
 			return info.getOpenMappedViews(set);
 		}
@@ -942,7 +944,7 @@ public class DebuggerStaticMappingServicePlugin extends Plugin
 			if (info == null) {
 				return null;
 			}
-			urls = info.getMappedProgramURLsInView(set, Range.singleton(snap));
+			urls = info.getMappedProgramURLsInView(set, Lifespan.at(snap));
 		}
 		Set<Program> result = new HashSet<>();
 		for (URL url : urls) {

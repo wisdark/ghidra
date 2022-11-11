@@ -45,7 +45,7 @@ import ghidra.dbg.*;
 import ghidra.dbg.target.*;
 import ghidra.dbg.util.PathUtils;
 import ghidra.framework.main.AppInfo;
-import ghidra.framework.main.FrontEndOnly;
+import ghidra.framework.main.ApplicationLevelOnlyPlugin;
 import ghidra.framework.options.SaveState;
 import ghidra.framework.plugintool.*;
 import ghidra.framework.plugintool.util.PluginStatus;
@@ -71,11 +71,11 @@ import ghidra.util.datastruct.ListenerSet;
 	servicesProvided = {
 		DebuggerModelService.class, })
 public class DebuggerModelServicePlugin extends Plugin
-		implements DebuggerModelServiceInternal, FrontEndOnly {
+		implements DebuggerModelServiceInternal, ApplicationLevelOnlyPlugin {
 
 	private static final String PREFIX_FACTORY = "Factory_";
 
-	// Since used for naming, no : allowed.
+	// Since used for naming, no ':' allowed.
 	public static final DateFormat DATE_FORMAT = new SimpleDateFormat("yyyy.MM.dd-HH.mm.ss-z");
 
 	protected class ListenersForRemovalAndFocus {
@@ -123,8 +123,15 @@ public class DebuggerModelServicePlugin extends Plugin
 				synchronized (this) {
 					this.root = r;
 				}
-				r.addListener(this.forRemoval);
-				if (!r.isValid()) {
+				boolean isInvalid = false;
+				try {
+					r.addListener(this.forRemoval);
+				}
+				catch (IllegalStateException e) {
+					isInvalid = true;
+				}
+				isInvalid |= !r.isValid();
+				if (isInvalid) {
 					forRemoval.invalidated(root, root, "Who knows?");
 				}
 				CompletableFuture<? extends TargetFocusScope> findSuitable =
@@ -201,8 +208,7 @@ public class DebuggerModelServicePlugin extends Plugin
 	protected final ChangeListener classChangeListener = new ChangeListenerForFactoryInstances();
 	protected final ListenerOnRecorders listenerOnRecorders = new ListenerOnRecorders();
 
-	protected final DebuggerSelectMappingOfferDialog offerDialog =
-		new DebuggerSelectMappingOfferDialog();
+	protected final DebuggerSelectMappingOfferDialog offerDialog;
 	protected final DebuggerConnectDialog connectDialog = new DebuggerConnectDialog();
 
 	DockingAction actionDisconnectAll;
@@ -211,7 +217,7 @@ public class DebuggerModelServicePlugin extends Plugin
 
 	public DebuggerModelServicePlugin(PluginTool tool) {
 		super(tool);
-
+		offerDialog = new DebuggerSelectMappingOfferDialog(tool);
 		ClassSearcher.addChangeListener(classChangeListener);
 		refreshFactoryInstances();
 		connectDialog.setModelService(this);
@@ -368,9 +374,8 @@ public class DebuggerModelServicePlugin extends Plugin
 		}
 	}
 
-	@Override
 	@Internal
-	public TraceRecorder doRecordTargetPromptOffers(PluginTool t, TargetObject target) {
+	protected TraceRecorder doRecordTargetPromptOffers(PluginTool t, TargetObject target) {
 		synchronized (recordersByTarget) {
 			TraceRecorder recorder = recordersByTarget.get(target);
 			if (recorder != null) {
@@ -518,7 +523,6 @@ public class DebuggerModelServicePlugin extends Plugin
 			throws IOException {
 		String traceName = nameTrace(target);
 		Trace trace = new DBTrace(traceName, mapper.getTraceCompilerSpec(), this);
-		//DefaultTraceRecorder recorder = new DefaultTraceRecorder(this, trace, target, mapper);
 		TraceRecorder recorder = mapper.startRecording(this, trace);
 		trace.release(this); // The recorder now owns it (on behalf of the service)
 		return recorder;
@@ -671,11 +675,16 @@ public class DebuggerModelServicePlugin extends Plugin
 		connectDialog.readConfigState(saveState);
 	}
 
-	@Override
-	public Stream<DebuggerProgramLaunchOffer> getProgramLaunchOffers(Program program) {
+	protected Stream<DebuggerProgramLaunchOffer> doGetProgramLaunchOffers(PluginTool tool,
+			Program program) {
 		return ClassSearcher.getInstances(DebuggerProgramLaunchOpinion.class)
 				.stream()
 				.flatMap(opinion -> opinion.getOffers(program, tool, this).stream());
+	}
+
+	@Override
+	public Stream<DebuggerProgramLaunchOffer> getProgramLaunchOffers(Program program) {
+		return doGetProgramLaunchOffers(tool, program);
 	}
 
 	protected CompletableFuture<DebuggerObjectModel> doShowConnectDialog(PluginTool tool,

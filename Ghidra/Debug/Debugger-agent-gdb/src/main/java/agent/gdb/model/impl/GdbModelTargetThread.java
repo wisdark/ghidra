@@ -42,7 +42,8 @@ import ghidra.util.Msg;
 		@TargetAttributeType(type = Void.class) })
 public class GdbModelTargetThread
 		extends DefaultTargetObject<TargetObject, GdbModelTargetThreadContainer> implements
-		TargetThread, TargetExecutionStateful, TargetSteppable, GdbModelSelectableObject {
+		TargetThread, TargetExecutionStateful, TargetSteppable, TargetAggregate,
+		GdbModelSelectableObject {
 	protected static final TargetStepKindSet SUPPORTED_KINDS = TargetStepKindSet.of( //
 		TargetStepKind.ADVANCE, //
 		TargetStepKind.FINISH, //
@@ -109,6 +110,7 @@ public class GdbModelTargetThread
 			this.info = res;
 			changeAttributes(List.of(), Map.of( //
 				SHORT_DISPLAY_ATTRIBUTE_NAME, shortDisplay = computeShortDisplay(), //
+				TID_ATTRIBUTE_NAME, info.getTid(), //
 				DISPLAY_ATTRIBUTE_NAME, display = computeDisplay() //
 			), "Initialized");
 		});
@@ -185,7 +187,7 @@ public class GdbModelTargetThread
 		}
 	}
 
-	protected StepCmd convertToGdb(TargetStepKind kind) {
+	protected static StepCmd convertToGdb(TargetStepKind kind) {
 		switch (kind) {
 			case FINISH:
 				return StepCmd.FINISH;
@@ -201,8 +203,6 @@ public class GdbModelTargetThread
 				return StepCmd.RETURN;
 			case UNTIL:
 				return StepCmd.UNTIL;
-			case EXTENDED:
-				return StepCmd.EXTENDED;
 			default:
 				throw new AssertionError();
 		}
@@ -212,6 +212,7 @@ public class GdbModelTargetThread
 	public CompletableFuture<Void> step(TargetStepKind kind) {
 		switch (kind) {
 			case SKIP:
+			case EXTENDED:
 				throw new UnsupportedOperationException(kind.name());
 			case ADVANCE: // Why no exec-advance in GDB/MI?
 				// TODO: This doesn't work, since advance requires a parameter

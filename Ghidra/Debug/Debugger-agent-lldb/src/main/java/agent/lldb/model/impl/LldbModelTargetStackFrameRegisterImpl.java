@@ -53,13 +53,14 @@ public class LldbModelTargetStackFrameRegisterImpl
 
 		changeAttributes(List.of(), Map.of( //
 			CONTAINER_ATTRIBUTE_NAME, bank.getContainer(), //
-			LENGTH_ATTRIBUTE_NAME, getBitLength(), //
+			BIT_LENGTH_ATTRIBUTE_NAME, getBitLength(), //
 			DISPLAY_ATTRIBUTE_NAME, getDescription(0), //
 			VALUE_ATTRIBUTE_NAME, value == null ? "0" : value, //
 			MODIFIED_ATTRIBUTE_NAME, false //
 		), "Initialized");
 	}
 
+	@Override
 	public String getDescription(int level) {
 		SBStream stream = new SBStream();
 		SBValue val = (SBValue) getModelObject();
@@ -89,6 +90,7 @@ public class LldbModelTargetStackFrameRegisterImpl
 		return (SBValue) getModelObject();
 	}
 
+	@Override
 	public byte[] getBytes() {
 		String oldValue = value;
 		value = getValue();
@@ -115,6 +117,7 @@ public class LldbModelTargetStackFrameRegisterImpl
 		return bytes;
 	}
 
+	@Override
 	public String getDisplay() {
 		return getValue() == null ? getName() : getName() + " : " + getValue();
 	}

@@ -126,7 +126,7 @@
 
     <P>Interrupt the current target's execution.</P>
 
-    <H3><A name="resume"></A><IMG alt="" src="images/continue.png"> Resume (Continue, Go)</H3>
+    <H3><A name="resume"></A><IMG alt="" src="images/resume.png"> Resume (Continue, Go)</H3>
 
     <P>Allow the current target to resume execution.</P>
 
@@ -142,7 +142,7 @@
 
     <P>Allow the current target to finish the current subroutine, pausing after.</P>
 
-    <H3><A name="step_last"></A><IMG alt="" src="images/stepout.png"> Step Last / Extended</H3>
+    <H3><A name="step_last"></A><IMG alt="" src="images/steplast.png"> Step Last / Extended</H3>
 
     <P>Perform a target-defined step, often the last (possibly custom or extended) step.</P>
 
@@ -322,6 +322,12 @@
     <P>Many actions are normally allowed only if the target is stopped or in some other defined
     state. Sometimes you may wish to ignore the current state and force the action, as, for
     example, when the debugger has lost track of the true state.</P>
+
+    <H3><A name="toggle_update_while_running">Update While Running</A></H3>
+
+    <P>By default, events are passed to the Objects Viewer even while the target is running. The
+    resulting changes in the GUI may be distracting for some. To disable updates to the Objects
+    Viewer, toggle "Updates While Running" off.</P>
 
     <H2><A name="color"></A>Color Options</H2>
 

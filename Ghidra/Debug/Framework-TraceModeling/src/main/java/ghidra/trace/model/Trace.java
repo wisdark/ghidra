@@ -19,8 +19,6 @@ import java.util.*;
 
 import javax.swing.ImageIcon;
 
-import com.google.common.collect.Range;
-
 import ghidra.program.model.address.*;
 import ghidra.program.model.data.*;
 import ghidra.program.model.lang.CompilerSpec;
@@ -32,12 +30,13 @@ import ghidra.trace.model.breakpoint.TraceBreakpoint;
 import ghidra.trace.model.breakpoint.TraceBreakpointManager;
 import ghidra.trace.model.context.TraceRegisterContextManager;
 import ghidra.trace.model.data.TraceBasedDataTypeManager;
-import ghidra.trace.model.language.TraceLanguageManager;
+import ghidra.trace.model.guest.*;
 import ghidra.trace.model.listing.*;
 import ghidra.trace.model.memory.*;
 import ghidra.trace.model.modules.*;
 import ghidra.trace.model.program.TraceProgramView;
 import ghidra.trace.model.program.TraceVariableSnapProgramView;
+import ghidra.trace.model.property.TraceAddressPropertyManager;
 import ghidra.trace.model.stack.TraceStack;
 import ghidra.trace.model.stack.TraceStackManager;
 import ghidra.trace.model.symbol.*;
@@ -57,14 +56,25 @@ public interface Trace extends DataTypeManagerDomainObject {
 	public static final class TraceObjectChangeType<T, U>
 			extends DefaultTraceChangeType<T, U> {
 		/**
-		 * An object was created, but not necessarily inserted.
+		 * An object was created, but not yet inserted.
+		 * 
+		 * <p>
+		 * Between the {@link #CREATED} event and the first {@link #LIFE_CHANGED} event, an object
+		 * is considered "incomplete," because it is likely missing its attributes. Thus, a trace
+		 * client must take care to ensure all attributes, especially fixed attributes, are added to
+		 * the object before it is inserted at its canonical path. Listeners may use
+		 * {@link TraceObject#getCanonicalParent(long)} to check if an object is complete for a
+		 * given snapshot.
 		 */
 		public static final TraceObjectChangeType<TraceObject, Void> CREATED =
 			new TraceObjectChangeType<>();
 		/**
-		 * An object's lifespan changed.
+		 * An object's life changed.
+		 * 
+		 * <p>
+		 * One of its canonical parents was created, deleted, or had its lifespan change.
 		 */
-		public static final TraceObjectChangeType<TraceObject, Range<Long>> LIFESPAN_CHANGED =
+		public static final TraceObjectChangeType<TraceObject, Void> LIFE_CHANGED =
 			new TraceObjectChangeType<>();
 		/**
 		 * An object was deleted.
@@ -72,27 +82,20 @@ public interface Trace extends DataTypeManagerDomainObject {
 		public static final TraceObjectChangeType<TraceObject, Void> DELETED =
 			new TraceObjectChangeType<>();
 		/**
-		 * An object's value changed.
-		 * 
-		 * <p>
-		 * If the old value is uniform for the new value's lifespan, that value is passed as the old
-		 * value. Otherwise, {@code null} is passed for the old value. If the value was cleared,
-		 * {@code null} is passed for the new value.
+		 * A value entry was created.
 		 */
-		public static final TraceObjectChangeType<TraceObjectValue, Object> VALUE_CHANGED =
+		public static final TraceObjectChangeType<TraceObjectValue, Void> VALUE_CREATED =
 			new TraceObjectChangeType<>();
 		/**
-		 * An object's value changed in lifespan.
-		 * 
-		 * <p>
-		 * This is only called for the value on which {@link TraceObjectValue#setLifespan(Range)} or
-		 * similar is called. If other values are truncated or deleted, there is no event. Listeners
-		 * concerned about a single snap need only check if the snap is contained in the new and old
-		 * lifespans. Listeners concerned about the full timeline can refresh the parent object's
-		 * values, or compute the coalescing and truncation manually.
+		 * A value entry changed in lifespan.
 		 */
-		public static final TraceObjectChangeType<TraceObjectValue, Range<Long>> //
+		public static final TraceObjectChangeType<TraceObjectValue, Lifespan> //
 		VALUE_LIFESPAN_CHANGED = new TraceObjectChangeType<>();
+		/**
+		 * A value entry was deleted.
+		 */
+		public static final TraceObjectChangeType<TraceObjectValue, Void> VALUE_DELETED =
+			new TraceObjectChangeType<>();
 	}
 
 	public static final class TraceBookmarkChangeType<T, U> extends DefaultTraceChangeType<T, U> {
@@ -102,7 +105,7 @@ public interface Trace extends DataTypeManagerDomainObject {
 			new TraceBookmarkChangeType<>();
 		public static final TraceBookmarkChangeType<TraceBookmark, Void> CHANGED =
 			new TraceBookmarkChangeType<>();
-		public static final TraceBookmarkChangeType<TraceBookmark, Range<Long>> LIFESPAN_CHANGED =
+		public static final TraceBookmarkChangeType<TraceBookmark, Lifespan> LIFESPAN_CHANGED =
 			new TraceBookmarkChangeType<>();
 		public static final TraceBookmarkChangeType<TraceBookmark, Void> DELETED =
 			new TraceBookmarkChangeType<>();
@@ -114,7 +117,7 @@ public interface Trace extends DataTypeManagerDomainObject {
 			new TraceBreakpointChangeType<>();
 		public static final TraceBreakpointChangeType<Void> CHANGED =
 			new TraceBreakpointChangeType<>();
-		public static final TraceBreakpointChangeType<Range<Long>> LIFESPAN_CHANGED =
+		public static final TraceBreakpointChangeType<Lifespan> LIFESPAN_CHANGED =
 			new TraceBreakpointChangeType<>();
 		public static final TraceBreakpointChangeType<Void> DELETED =
 			new TraceBreakpointChangeType<>();
@@ -136,7 +139,7 @@ public interface Trace extends DataTypeManagerDomainObject {
 		// May be a single unit or a whole block. "newValue" is first unit
 		public static final TraceCodeChangeType<TraceAddressSnapRange, TraceCodeUnit> ADDED =
 			new TraceCodeChangeType<>();
-		public static final TraceCodeChangeType<TraceCodeUnit, Range<Long>> LIFESPAN_CHANGED =
+		public static final TraceCodeChangeType<TraceCodeUnit, Lifespan> LIFESPAN_CHANGED =
 			new TraceCodeChangeType<>();
 		// May be a single unit or a coalesced range. "oldValue" is null or first unit
 		public static final TraceCodeChangeType<TraceAddressSnapRange, TraceCodeUnit> REMOVED =
@@ -183,7 +186,7 @@ public interface Trace extends DataTypeManagerDomainObject {
 			extends DefaultTraceChangeType<T, U> {
 		public static final TraceCompositeDataChangeType<TraceAddressSnapRange, TraceData> ADDED =
 			new TraceCompositeDataChangeType<>();
-		public static final TraceCompositeDataChangeType<TraceData, Range<Long>> LIFESPAN_CHANGED =
+		public static final TraceCompositeDataChangeType<TraceData, Lifespan> LIFESPAN_CHANGED =
 			new TraceCompositeDataChangeType<>();
 		public static final TraceCompositeDataChangeType<TraceAddressSnapRange, TraceData> REMOVED =
 			new TraceCompositeDataChangeType<>();
@@ -263,11 +266,17 @@ public interface Trace extends DataTypeManagerDomainObject {
 			new TraceMemoryRegionChangeType<>();
 		public static final TraceMemoryRegionChangeType<Void> CHANGED =
 			new TraceMemoryRegionChangeType<>();
-		public static final TraceMemoryRegionChangeType<Range<Long>> LIFESPAN_CHANGED =
+		public static final TraceMemoryRegionChangeType<Lifespan> LIFESPAN_CHANGED =
 			new TraceMemoryRegionChangeType<>();
 		public static final TraceMemoryRegionChangeType<Void> DELETED =
 			new TraceMemoryRegionChangeType<>();
 		// NOTE: No MOVING, SPLITTING, or JOINING
+	}
+
+	public static final class TraceOverlaySpaceChangeType
+			extends DefaultTraceChangeType<Trace, AddressSpace> {
+		public static final TraceOverlaySpaceChangeType ADDED = new TraceOverlaySpaceChangeType();
+		public static final TraceOverlaySpaceChangeType DELETED = new TraceOverlaySpaceChangeType();
 	}
 
 	public static final class TraceMemoryStateChangeType<U>
@@ -280,7 +289,7 @@ public interface Trace extends DataTypeManagerDomainObject {
 			extends DefaultTraceChangeType<TraceModule, U> {
 		public static final TraceModuleChangeType<Void> ADDED = new TraceModuleChangeType<>();
 		public static final TraceModuleChangeType<Void> CHANGED = new TraceModuleChangeType<>();
-		public static final TraceModuleChangeType<Range<Long>> LIFESPAN_CHANGED =
+		public static final TraceModuleChangeType<Lifespan> LIFESPAN_CHANGED =
 			new TraceModuleChangeType<>();
 		// NOTE: module's sections will have been deleted, without events
 		public static final TraceModuleChangeType<Void> DELETED = new TraceModuleChangeType<>();
@@ -289,7 +298,7 @@ public interface Trace extends DataTypeManagerDomainObject {
 	public static final class TraceReferenceChangeType<T, U> extends DefaultTraceChangeType<T, U> {
 		public static final TraceReferenceChangeType<TraceAddressSnapRange, TraceReference> ADDED =
 			new TraceReferenceChangeType<>();
-		public static final TraceReferenceChangeType<TraceReference, Range<Long>> LIFESPAN_CHANGED =
+		public static final TraceReferenceChangeType<TraceReference, Lifespan> LIFESPAN_CHANGED =
 			new TraceReferenceChangeType<>();
 		public static final TraceReferenceChangeType<TraceReference, Boolean> PRIMARY_CHANGED =
 			new TraceReferenceChangeType<>();
@@ -307,7 +316,12 @@ public interface Trace extends DataTypeManagerDomainObject {
 	public static final class TraceStackChangeType<U>
 			extends DefaultTraceChangeType<TraceStack, U> {
 		public static final TraceStackChangeType<Void> ADDED = new TraceStackChangeType<>();
-		public static final TraceStackChangeType<Void> CHANGED = new TraceStackChangeType<>();
+		/**
+		 * NOTE: The "new value" is the (min) snap where the change occurred. For StackFrame, it's
+		 * Stack.getSnap(), for ObjectStackFrame, the min snap of the value entry. The "old value"
+		 * is always 0.
+		 */
+		public static final TraceStackChangeType<Long> CHANGED = new TraceStackChangeType<>();
 		public static final TraceStackChangeType<Void> DELETED = new TraceStackChangeType<>();
 	}
 
@@ -346,7 +360,7 @@ public interface Trace extends DataTypeManagerDomainObject {
 			new TraceSymbolChangeType<>();
 		public static final TraceSymbolChangeType<Address> ADDRESS_CHANGED =
 			new TraceSymbolChangeType<>();
-		public static final DefaultTraceChangeType<TraceSymbolWithLifespan, Range<Long>> LIFESPAN_CHANGED =
+		public static final DefaultTraceChangeType<TraceSymbolWithLifespan, Lifespan> LIFESPAN_CHANGED =
 			new DefaultTraceChangeType<>();
 		public static final TraceSymbolChangeType<Void> DELETED = new TraceSymbolChangeType<>();
 		// Other changes not captured above
@@ -357,7 +371,7 @@ public interface Trace extends DataTypeManagerDomainObject {
 			extends DefaultTraceChangeType<TraceThread, U> {
 		public static final TraceThreadChangeType<Void> ADDED = new TraceThreadChangeType<>();
 		public static final TraceThreadChangeType<Void> CHANGED = new TraceThreadChangeType<>();
-		public static final TraceThreadChangeType<Range<Long>> LIFESPAN_CHANGED =
+		public static final TraceThreadChangeType<Lifespan> LIFESPAN_CHANGED =
 			new TraceThreadChangeType<>();
 		public static final TraceThreadChangeType<Void> DELETED = new TraceThreadChangeType<>();
 	}
@@ -369,11 +383,27 @@ public interface Trace extends DataTypeManagerDomainObject {
 		public static final TraceSnapshotChangeType<Void> DELETED = new TraceSnapshotChangeType<>();
 	}
 
+	public static final class TracePlatformChangeType<U>
+			extends DefaultTraceChangeType<TraceGuestPlatform, U> {
+		public static final TracePlatformChangeType<Void> ADDED = new TracePlatformChangeType<>();
+		public static final TracePlatformChangeType<Void> DELETED = new TracePlatformChangeType<>();
+		public static final TracePlatformChangeType<TraceGuestPlatformMappedRange> MAPPING_ADDED =
+			new TracePlatformChangeType<>();
+		public static final TracePlatformChangeType<TraceGuestPlatformMappedRange> MAPPING_DELETED =
+			new TracePlatformChangeType<>();
+	}
+
+	public interface TraceProgramViewListener {
+		void viewCreated(TraceProgramView view);
+	}
+
 	Language getBaseLanguage();
 
 	CompilerSpec getBaseCompilerSpec();
 
 	AddressFactory getBaseAddressFactory();
+
+	TraceAddressPropertyManager getAddressPropertyManager();
 
 	TraceBookmarkManager getBookmarkManager();
 
@@ -386,7 +416,7 @@ public interface Trace extends DataTypeManagerDomainObject {
 
 	TraceEquateManager getEquateManager();
 
-	TraceLanguageManager getLanguageManager();
+	TracePlatformManager getPlatformManager();
 
 	TraceMemoryManager getMemoryManager();
 
@@ -413,6 +443,13 @@ public interface Trace extends DataTypeManagerDomainObject {
 	TraceVariableSnapProgramView createProgramView(long snap);
 
 	/**
+	 * Collect all program views, fixed or variable, of this trace.
+	 * 
+	 * @return the current set of program views
+	 */
+	Collection<TraceProgramView> getAllProgramViews();
+
+	/**
 	 * Get the "canonical" program view for this trace
 	 * 
 	 * <p>
@@ -422,6 +459,12 @@ public interface Trace extends DataTypeManagerDomainObject {
 	 * @return the canonical program view
 	 */
 	TraceVariableSnapProgramView getProgramView();
+
+	TraceTimeViewport createTimeViewport();
+
+	void addProgramViewListener(TraceProgramViewListener listener);
+
+	void removeProgramViewListener(TraceProgramViewListener listener);
 
 	LockHold lockRead();
 

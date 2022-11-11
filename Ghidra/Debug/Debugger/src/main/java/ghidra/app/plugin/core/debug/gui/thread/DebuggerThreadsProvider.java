@@ -19,14 +19,12 @@ import java.awt.BorderLayout;
 import java.awt.Rectangle;
 import java.awt.event.MouseAdapter;
 import java.awt.event.MouseEvent;
-import java.util.*;
+import java.util.Objects;
 
 import javax.swing.*;
 import javax.swing.event.ListSelectionEvent;
 import javax.swing.table.TableColumn;
 import javax.swing.table.TableColumnModel;
-
-import com.google.common.collect.Range;
 
 import docking.ActionContext;
 import docking.WindowPosition;
@@ -35,6 +33,7 @@ import docking.widgets.HorizontalTabPanel;
 import docking.widgets.HorizontalTabPanel.TabListCellRenderer;
 import docking.widgets.dialogs.InputDialog;
 import docking.widgets.table.*;
+import docking.widgets.table.RangeCursorTableHeaderRenderer.SeekListener;
 import ghidra.app.plugin.core.debug.DebuggerCoordinates;
 import ghidra.app.plugin.core.debug.DebuggerPluginPackage;
 import ghidra.app.plugin.core.debug.gui.DebuggerResources;
@@ -48,10 +47,9 @@ import ghidra.framework.model.DomainObject;
 import ghidra.framework.plugintool.AutoService;
 import ghidra.framework.plugintool.ComponentProviderAdapter;
 import ghidra.framework.plugintool.annotation.AutoServiceConsumed;
-import ghidra.trace.model.Trace;
+import ghidra.trace.model.*;
 import ghidra.trace.model.Trace.TraceSnapshotChangeType;
 import ghidra.trace.model.Trace.TraceThreadChangeType;
-import ghidra.trace.model.TraceDomainObjectListener;
 import ghidra.trace.model.thread.TraceThread;
 import ghidra.trace.model.thread.TraceThreadManager;
 import ghidra.trace.model.time.TraceSnapshot;
@@ -87,179 +85,13 @@ public class DebuggerThreadsProvider extends ComponentProviderAdapter {
 		return true;
 	}
 
-	protected class StepSnapBackwardAction extends AbstractStepSnapBackwardAction {
-		public static final String GROUP = DebuggerResources.GROUP_CONTROL;
-
-		public StepSnapBackwardAction() {
-			super(plugin);
-			setToolBarData(new ToolBarData(ICON, GROUP, "1"));
-			addLocalAction(this);
-			setEnabled(false);
-		}
-
-		@Override
-		public void actionPerformed(ActionContext context) {
-			if (current.getTime().isSnapOnly()) {
-				traceManager.activateSnap(current.getSnap() - 1);
-			}
-			else {
-				traceManager.activateSnap(current.getSnap());
-			}
-		}
-
-		@Override
-		public boolean isEnabledForContext(ActionContext context) {
-			if (current.getTrace() == null) {
-				return false;
-			}
-			if (!current.getTime().isSnapOnly()) {
-				return true;
-			}
-			if (current.getSnap() <= 0) {
-				return false;
-			}
-			return true;
-		}
-	}
-
-	protected class EmulateTickBackwardAction extends AbstractEmulateTickBackwardAction {
-		public static final String GROUP = DebuggerResources.GROUP_CONTROL;
-
-		public EmulateTickBackwardAction() {
-			super(plugin);
-			setToolBarData(new ToolBarData(ICON, GROUP, "2"));
-			addLocalAction(this);
-			setEnabled(false);
-		}
-
-		@Override
-		public void actionPerformed(ActionContext context) {
-			if (current.getTrace() == null) {
-				return;
-			}
-			TraceSchedule time = current.getTime().steppedBackward(current.getTrace(), 1);
-			if (time == null) {
-				return;
-			}
-			traceManager.activateTime(time);
-		}
-
-		@Override
-		public boolean isEnabledForContext(ActionContext context) {
-			if (emulationService == null) {
-				return false;
-			}
-			if (current.getTrace() == null) {
-				return false;
-			}
-			if (current.getTime().steppedBackward(current.getTrace(), 1) == null) {
-				return false;
-			}
-			return true;
-		}
-	}
-
-	protected class EmulateTickForwardAction extends AbstractEmulateTickForwardAction {
-		public static final String GROUP = DebuggerResources.GROUP_CONTROL;
-
-		public EmulateTickForwardAction() {
-			super(plugin);
-			setToolBarData(new ToolBarData(ICON, GROUP, "3"));
-			addLocalAction(this);
-			setEnabled(false);
-		}
-
-		@Override
-		public void actionPerformed(ActionContext context) {
-			if (current.getThread() == null) {
-				return;
-			}
-			TraceSchedule time = current.getTime().steppedForward(current.getThread(), 1);
-			traceManager.activateTime(time);
-		}
-
-		@Override
-		public boolean isEnabledForContext(ActionContext context) {
-			if (emulationService == null) {
-				return false;
-			}
-			if (current.getThread() == null) {
-				return false;
-			}
-			return true;
-		}
-	}
-
-	protected class StepSnapForwardAction extends AbstractStepSnapForwardAction {
-		public static final String GROUP = DebuggerResources.GROUP_CONTROL;
-
-		public StepSnapForwardAction() {
-			super(plugin);
-			setToolBarData(new ToolBarData(ICON, GROUP, "4"));
-			addLocalAction(this);
-			setEnabled(false);
-		}
-
-		@Override
-		public void actionPerformed(ActionContext context) {
-			traceManager.activateSnap(current.getSnap() + 1);
-		}
-
-		@Override
-		public boolean isEnabledForContext(ActionContext context) {
-			Trace curTrace = current.getTrace();
-			if (curTrace == null) {
-				return false;
-			}
-			Long maxSnap = curTrace.getTimeManager().getMaxSnap();
-			if (maxSnap == null || current.getSnap() >= maxSnap) {
-				return false;
-			}
-			return true;
-		}
-	}
-
-	protected class SeekTracePresentAction extends AbstractSeekTracePresentAction
-			implements BooleanChangeAdapter {
-		public static final String GROUP = "zz";
-
-		public SeekTracePresentAction() {
-			super(plugin);
-			setToolBarData(new ToolBarData(ICON, GROUP));
-			addLocalAction(this);
-			setSelected(traceManager == null ? false : traceManager.isAutoActivatePresent());
-			traceManager.addAutoActivatePresentChangeListener(this);
-		}
-
-		@Override
-		public boolean isEnabledForContext(ActionContext context) {
-			return traceManager != null;
-		}
-
-		@Override
-		public void actionPerformed(ActionContext context) {
-			if (traceManager == null) {
-				return;
-			}
-			traceManager.setAutoActivatePresent(isSelected());
-		}
-
-		@Override
-		public void changed(Boolean value) {
-			if (isSelected() == value) {
-				return;
-			}
-			setSelected(value);
-		}
-	}
-
 	protected static class ThreadTableModel
 			extends RowWrappedEnumeratedColumnTableModel< //
 					ThreadTableColumns, ObjectKey, ThreadRow, TraceThread> {
 
 		public ThreadTableModel(DebuggerThreadsProvider provider) {
-			super("Threads", ThreadTableColumns.class, TraceThread::getObjectKey,
-				t -> new ThreadRow(provider.modelService, t));
+			super(provider.getTool(), "Threads", ThreadTableColumns.class,
+				TraceThread::getObjectKey, t -> new ThreadRow(provider.modelService, t));
 		}
 	}
 
@@ -321,9 +153,9 @@ public class DebuggerThreadsProvider extends ComponentProviderAdapter {
 
 	private final DebuggerThreadsPlugin plugin;
 
-	// @AutoServiceConsumed  by method
+	// @AutoServiceConsumed by method
 	private DebuggerModelService modelService;
-	@AutoServiceConsumed // NB, also by method
+	// @AutoServiceConsumed by method
 	private DebuggerTraceManagerService traceManager;
 	@AutoServiceConsumed // NB, also by method
 	private DebuggerEmulationService emulationService;
@@ -337,8 +169,12 @@ public class DebuggerThreadsProvider extends ComponentProviderAdapter {
 	private final ThreadsListener threadsListener = new ThreadsListener();
 	private final CollectionChangeListener<TraceRecorder> recordersListener =
 		new RecordersChangeListener();
+	private final BooleanChangeAdapter activatePresentChangeListener =
+		this::changedAutoActivatePresent;
+	private final BooleanChangeAdapter synchronizeFocusChangeListener =
+		this::changedSynchronizeFocus;
 	/* package access for testing */
-	final RangeTableCellRenderer<Long> rangeRenderer = new RangeTableCellRenderer<>();
+	final SpanTableCellRenderer<Long> spanRenderer = new SpanTableCellRenderer<>();
 	final RangeCursorTableHeaderRenderer<Long> headerRenderer =
 		new RangeCursorTableHeaderRenderer<>();
 
@@ -354,11 +190,12 @@ public class DebuggerThreadsProvider extends ComponentProviderAdapter {
 	private ActionContext myActionContext;
 
 	DockingAction actionSaveTrace;
-	StepSnapBackwardAction actionStepSnapBackward;
-	EmulateTickBackwardAction actionEmulateTickBackward;
-	EmulateTickForwardAction actionEmulateTickForward;
-	StepSnapForwardAction actionStepSnapForward;
-	SeekTracePresentAction actionSeekTracePresent;
+	DockingAction actionStepSnapBackward;
+	DockingAction actionEmulateTickBackward;
+	DockingAction actionEmulateTickForward;
+	DockingAction actionEmulateTickSkipForward;
+	DockingAction actionStepSnapForward;
+	ToggleDockingAction actionSeekTracePresent;
 	ToggleDockingAction actionSyncFocus;
 	DockingAction actionGoToTime;
 
@@ -367,7 +204,9 @@ public class DebuggerThreadsProvider extends ComponentProviderAdapter {
 	DockingAction actionCloseDeadTraces;
 	DockingAction actionCloseAllTraces;
 
-	Set<Object> strongRefs = new HashSet<>(); // Eww
+	// strong refs
+	ToToggleSelectionListener toToggleSelectionListener;
+	SeekListener seekListener;
 
 	public DebuggerThreadsProvider(final DebuggerThreadsPlugin plugin) {
 		super(plugin.getTool(), DebuggerResources.TITLE_PROVIDER_THREADS, plugin.getName());
@@ -381,8 +220,6 @@ public class DebuggerThreadsProvider extends ComponentProviderAdapter {
 
 		buildMainPanel();
 
-		// TODO: Consider a custom cell renderer in the table instead of a timeline widget?
-		// TODO: Should I receive clicks on that renderer to seek to a given snap?
 		setDefaultWindowPosition(WindowPosition.BOTTOM);
 
 		myActionContext = new DebuggerSnapActionContext(current.getTrace(), current.getViewSnap());
@@ -390,11 +227,6 @@ public class DebuggerThreadsProvider extends ComponentProviderAdapter {
 		contextChanged();
 
 		setVisible(true);
-	}
-
-	private <T> T strongRef(T t) {
-		strongRefs.add(t);
-		return t;
 	}
 
 	@AutoServiceConsumed
@@ -410,9 +242,21 @@ public class DebuggerThreadsProvider extends ComponentProviderAdapter {
 
 	@AutoServiceConsumed
 	public void setTraceManager(DebuggerTraceManagerService traceManager) {
-		if (traceManager != null && actionSeekTracePresent != null) {
-			actionSeekTracePresent.setSelected(traceManager.isAutoActivatePresent());
-			actionSyncFocus.setSelected(traceManager.isSynchronizeFocus());
+		if (this.traceManager != null) {
+			this.traceManager
+					.removeAutoActivatePresentChangeListener(activatePresentChangeListener);
+			this.traceManager.removeSynchronizeFocusChangeListener(synchronizeFocusChangeListener);
+		}
+		this.traceManager = traceManager;
+		if (traceManager != null) {
+			traceManager.addAutoActivatePresentChangeListener(activatePresentChangeListener);
+			traceManager.addSynchronizeFocusChangeListener(synchronizeFocusChangeListener);
+			if (actionSeekTracePresent != null) {
+				actionSeekTracePresent.setSelected(traceManager.isAutoActivatePresent());
+			}
+			if (actionSyncFocus != null) {
+				actionSyncFocus.setSelected(traceManager.isSynchronizeFocus());
+			}
 		}
 		contextChanged();
 	}
@@ -510,8 +354,8 @@ public class DebuggerThreadsProvider extends ComponentProviderAdapter {
 
 	protected void updateTimelineMax() {
 		long max = orZero(current.getTrace().getTimeManager().getMaxSnap());
-		Range<Long> fullRange = Range.closed(0L, max + 1);
-		rangeRenderer.setFullRange(fullRange);
+		Lifespan fullRange = Lifespan.span(0, max + 1);
+		spanRenderer.setFullRange(fullRange);
 		headerRenderer.setFullRange(fullRange);
 		threadTable.getTableHeader().repaint();
 	}
@@ -617,10 +461,10 @@ public class DebuggerThreadsProvider extends ComponentProviderAdapter {
 		colComment.setPreferredWidth(100);
 		TableColumn colPlot = columnModel.getColumn(ThreadTableColumns.PLOT.ordinal());
 		colPlot.setPreferredWidth(200);
-		colPlot.setCellRenderer(rangeRenderer);
+		colPlot.setCellRenderer(spanRenderer);
 		colPlot.setHeaderRenderer(headerRenderer);
 
-		headerRenderer.addSeekListener(threadTable, ThreadTableColumns.PLOT.ordinal(), pos -> {
+		headerRenderer.addSeekListener(seekListener = pos -> {
 			long snap = Math.round(pos);
 			if (current.getTrace() == null || snap < 0) {
 				snap = 0;
@@ -632,12 +476,34 @@ public class DebuggerThreadsProvider extends ComponentProviderAdapter {
 	}
 
 	protected void createActions() {
-		// TODO: Make other actions use builder?
-		actionStepSnapBackward = new StepSnapBackwardAction();
-		actionEmulateTickBackward = new EmulateTickBackwardAction();
-		actionEmulateTickForward = new EmulateTickForwardAction();
-		actionStepSnapForward = new StepSnapForwardAction();
-		actionSeekTracePresent = new SeekTracePresentAction();
+		actionStepSnapBackward = StepSnapBackwardAction.builder(plugin)
+				.enabledWhen(this::isStepSnapBackwardEnabled)
+				.enabled(false)
+				.onAction(this::activatedStepSnapBackward)
+				.buildAndInstallLocal(this);
+		actionEmulateTickBackward = EmulateTickBackwardAction.builder(plugin)
+				.enabledWhen(this::isEmulateTickBackwardEnabled)
+				.onAction(this::activatedEmulateTickBackward)
+				.buildAndInstallLocal(this);
+		actionEmulateTickForward = EmulateTickForwardAction.builder(plugin)
+				.enabledWhen(this::isEmulateTickForwardEnabled)
+				.onAction(this::activatedEmulateTickForward)
+				.buildAndInstallLocal(this);
+		actionEmulateTickSkipForward = EmulateSkipTickForwardAction.builder(plugin)
+				.enabledWhen(this::isEmulateSkipTickForwardEnabled)
+				.onAction(this::activatedEmulateSkipTickForward)
+				.buildAndInstallLocal(this);
+		actionStepSnapForward = StepSnapForwardAction.builder(plugin)
+				.enabledWhen(this::isStepSnapForwardEnabled)
+				.enabled(false)
+				.onAction(this::activatedStepSnapForward)
+				.buildAndInstallLocal(this);
+		actionSeekTracePresent = SeekTracePresentAction.builder(plugin)
+				.enabledWhen(this::isSeekTracePresentEnabled)
+				.onAction(this::toggledSeekTracePresent)
+				.selected(traceManager == null ? false : traceManager.isAutoActivatePresent())
+				.buildAndInstallLocal(this);
+
 		actionSyncFocus = SynchronizeFocusAction.builder(plugin)
 				.selected(traceManager != null && traceManager.isSynchronizeFocus())
 				.enabledWhen(c -> traceManager != null)
@@ -647,8 +513,8 @@ public class DebuggerThreadsProvider extends ComponentProviderAdapter {
 				.enabledWhen(c -> current.getTrace() != null)
 				.onAction(c -> activatedGoToTime())
 				.buildAndInstallLocal(this);
-		traceManager.addSynchronizeFocusChangeListener(
-			strongRef(new ToToggleSelectionListener(actionSyncFocus)));
+		traceManager.addSynchronizeFocusChangeListener(toToggleSelectionListener =
+			new ToToggleSelectionListener(actionSyncFocus));
 
 		actionCloseTrace = CloseTraceAction.builderPopup(plugin)
 				.withContext(DebuggerTraceFileActionContext.class)
@@ -670,6 +536,129 @@ public class DebuggerThreadsProvider extends ComponentProviderAdapter {
 				.popupWhen(c -> !traceManager.getOpenTraces().isEmpty() && modelService != null)
 				.onAction(c -> traceManager.closeDeadTraces())
 				.buildAndInstallLocal(this);
+	}
+
+	private boolean isStepSnapBackwardEnabled(ActionContext context) {
+		if (current.getTrace() == null) {
+			return false;
+		}
+		if (!current.getTime().isSnapOnly()) {
+			return true;
+		}
+		if (current.getSnap() <= 0) {
+			return false;
+		}
+		return true;
+	}
+
+	private void activatedStepSnapBackward(ActionContext context) {
+		if (current.getTime().isSnapOnly()) {
+			traceManager.activateSnap(current.getSnap() - 1);
+		}
+		else {
+			traceManager.activateSnap(current.getSnap());
+		}
+	}
+
+	private boolean isEmulateTickBackwardEnabled(ActionContext context) {
+		if (emulationService == null) {
+			return false;
+		}
+		if (current.getTrace() == null) {
+			return false;
+		}
+		if (current.getTime().steppedBackward(current.getTrace(), 1) == null) {
+			return false;
+		}
+		return true;
+	}
+
+	private void activatedEmulateTickBackward(ActionContext context) {
+		if (current.getTrace() == null) {
+			return;
+		}
+		TraceSchedule time = current.getTime().steppedBackward(current.getTrace(), 1);
+		if (time == null) {
+			return;
+		}
+		traceManager.activateTime(time);
+	}
+
+	private boolean isEmulateTickForwardEnabled(ActionContext context) {
+		if (emulationService == null) {
+			return false;
+		}
+		if (current.getThread() == null) {
+			return false;
+		}
+		return true;
+	}
+
+	private void activatedEmulateTickForward(ActionContext context) {
+		if (current.getThread() == null) {
+			return;
+		}
+		TraceSchedule time = current.getTime().steppedForward(current.getThread(), 1);
+		traceManager.activateTime(time);
+	}
+
+	private boolean isEmulateSkipTickForwardEnabled(ActionContext context) {
+		if (emulationService == null) {
+			return false;
+		}
+		if (current.getThread() == null) {
+			return false;
+		}
+		return true;
+	}
+
+	private void activatedEmulateSkipTickForward(ActionContext context) {
+		if (current.getThread() == null) {
+			return;
+		}
+		TraceSchedule time = current.getTime().skippedForward(current.getThread(), 1);
+		traceManager.activateTime(time);
+	}
+
+	private boolean isStepSnapForwardEnabled(ActionContext context) {
+		Trace curTrace = current.getTrace();
+		if (curTrace == null) {
+			return false;
+		}
+		Long maxSnap = curTrace.getTimeManager().getMaxSnap();
+		if (maxSnap == null || current.getSnap() >= maxSnap) {
+			return false;
+		}
+		return true;
+	}
+
+	private void activatedStepSnapForward(ActionContext contetxt) {
+		traceManager.activateSnap(current.getSnap() + 1);
+	}
+
+	private boolean isSeekTracePresentEnabled(ActionContext context) {
+		return traceManager != null;
+	}
+
+	private void toggledSeekTracePresent(ActionContext context) {
+		if (traceManager == null) {
+			return;
+		}
+		traceManager.setAutoActivatePresent(actionSeekTracePresent.isSelected());
+	}
+
+	private void changedAutoActivatePresent(boolean value) {
+		if (actionSeekTracePresent == null || actionSeekTracePresent.isSelected()) {
+			return;
+		}
+		actionSeekTracePresent.setSelected(value);
+	}
+
+	private void changedSynchronizeFocus(boolean value) {
+		if (actionSyncFocus == null || actionSyncFocus.isSelected()) {
+			return;
+		}
+		actionSyncFocus.setSelected(value);
 	}
 
 	private void toggleSyncFocus(boolean enabled) {

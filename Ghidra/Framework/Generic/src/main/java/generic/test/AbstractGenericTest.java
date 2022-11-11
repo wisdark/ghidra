@@ -43,6 +43,8 @@ import org.junit.rules.*;
 import org.junit.runner.Description;
 
 import generic.jar.ResourceFile;
+import generic.test.rule.Repeated;
+import generic.test.rule.RepeatedTestRule;
 import generic.util.WindowUtilities;
 import ghidra.GhidraTestApplicationLayout;
 import ghidra.framework.Application;
@@ -113,6 +115,17 @@ public abstract class AbstractGenericTest extends AbstractGTest {
 	@Rule
 	public RuleChain ruleChain = RuleChain.outerRule(testName).around(watchman);// control rule ordering
 
+	/**
+	 * This rule handles the {@link Repeated} annotation
+	 *
+	 * <p>
+	 * During batch mode, this rule should never be needed. This rule is included here as a
+	 * convenience, in case a developer wants to use the {@link Repeated} annotation to diagnose a
+	 * non-deterministic test failure. Without this rule, the annotation would be silently ignored.
+	 */
+	@Rule
+	public TestRule repeatedRule = new RepeatedTestRule();
+
 	private void debugBatch(String message) {
 		if (BATCH_MODE) {
 			Msg.debug(AbstractGenericTest.class, message);
@@ -123,7 +136,14 @@ public abstract class AbstractGenericTest extends AbstractGTest {
 
 		initializeSystemProperties();
 
-		ApplicationLayout layout = test.createApplicationLayout();
+		ApplicationLayout layout;
+		try {
+			layout = test.createApplicationLayout();
+		}
+		catch (Exception e) {
+			throw new AssertException(e);
+		}
+
 		initializeLayout(layout);
 		ApplicationConfiguration configuration = test.createApplicationConfiguration();
 		if (initialized) {
@@ -144,7 +164,7 @@ public abstract class AbstractGenericTest extends AbstractGTest {
 			Application.initializeApplication(layout, configuration);
 		}
 		catch (Exception e) {
-			throw e;
+			throw new AssertException(e);
 		}
 	}
 
@@ -157,7 +177,7 @@ public abstract class AbstractGenericTest extends AbstractGTest {
 
 	/**
 	 * A method to update any {@link ApplicationLayout} values
-	 * 
+	 *
 	 * @param layout the layout to initialize
 	 */
 	protected void initializeLayout(ApplicationLayout layout) {
@@ -195,13 +215,8 @@ public abstract class AbstractGenericTest extends AbstractGTest {
 		initialize(this);
 	}
 
-	protected ApplicationLayout createApplicationLayout() {
-		try {
-			return new GhidraTestApplicationLayout(new File(getTestDirectoryPath()));
-		}
-		catch (IOException e) {
-			throw new AssertException(e);
-		}
+	protected ApplicationLayout createApplicationLayout() throws IOException {
+		return new GhidraTestApplicationLayout(new File(getTestDirectoryPath()));
 	}
 
 	protected ApplicationConfiguration createApplicationConfiguration() {
@@ -211,7 +226,7 @@ public abstract class AbstractGenericTest extends AbstractGTest {
 
 	/**
 	 * Determine if test failure occur (for use within tear down methods)
-	 * 
+	 *
 	 * @return true if test failure detected
 	 */
 	protected boolean hasTestFailed() {
@@ -222,7 +237,7 @@ public abstract class AbstractGenericTest extends AbstractGTest {
 	 * A callback for subclasses when a test has failed. This will be called
 	 * <b>after</b> <code>tearDown()</code>.  This means that any diagnostics will have to
 	 * take into account items that have already been disposed.
-	 * 
+	 *
 	 * @param e the exception that happened when the test failed
 	 */
 	protected void testFailed(Throwable e) {
@@ -252,8 +267,7 @@ public abstract class AbstractGenericTest extends AbstractGTest {
 	public static Set<Window> getAllWindows() {
 		Set<Window> set = new HashSet<>();
 		Frame sharedOwnerFrame = (Frame) AppContext.getAppContext()
-				.get(
-					new StringBuffer("SwingUtilities.sharedOwnerFrame"));
+				.get(new StringBuffer("SwingUtilities.sharedOwnerFrame"));
 		if (sharedOwnerFrame != null) {
 			set.addAll(getAllWindows(sharedOwnerFrame));
 		}
@@ -294,7 +308,7 @@ public abstract class AbstractGenericTest extends AbstractGTest {
 	/**
 	 * Load a text resource file into an ArrayList. Each line of the file is
 	 * stored as an item in the list.
-	 * 
+	 *
 	 * @param cls class where resource exists
 	 * @param name resource filename
 	 * @return list of lines contained in file
@@ -391,7 +405,7 @@ public abstract class AbstractGenericTest extends AbstractGTest {
 
 	/**
 	 * Returns the data directory containing test programs and data
-	 * 
+	 *
 	 * @return the data directory containing test programs and data
 	 */
 	public static File getTestDataDirectory() {
@@ -494,7 +508,7 @@ public abstract class AbstractGenericTest extends AbstractGTest {
 	 * Get the first field object contained within object ownerInstance which
 	 * has the type classType. This method is only really useful if it is known
 	 * that only a single field of classType exists within the ownerInstance.
-	 * 
+	 *
 	 * @param <T> the type
 	 * @param classType the class type of the desired field
 	 * @param ownerInstance the object instance that owns the field
@@ -635,7 +649,7 @@ public abstract class AbstractGenericTest extends AbstractGTest {
 	 * Finds the button with the indicated TEXT that is a sub-component of the
 	 * indicated container, and then programmatically presses the button. <BR>
 	 * The following is a sample JUnit test use:
-	 * 
+	 *
 	 * <PRE>
 	 * env.showTool();
 	 * OptionDialog dialog = (OptionDialog) env.waitForDialog(OptionDialog.class, 1000);
@@ -655,7 +669,7 @@ public abstract class AbstractGenericTest extends AbstractGTest {
 	/**
 	 * Finds the button with the indicated TEXT that is a sub-component of the
 	 * indicated container, and then programmatically presses the button.
-	 * 
+	 *
 	 * @param container the container to search. (Typically a dialog.)
 	 * @param buttonText the text on the desired JButton.
 	 * @param waitForCompletion if true wait for action to complete before
@@ -683,7 +697,7 @@ public abstract class AbstractGenericTest extends AbstractGTest {
 	/**
 	 * Finds the button with the indicated NAME that is a subcomponent of the
 	 * indicated container, and then programmatically presses the button.
-	 * 
+	 *
 	 * @param container the container to search. (Typically a dialog)
 	 * @param buttonName the name on the desired AbstractButton (see
 	 *            Component.setName())
@@ -695,7 +709,7 @@ public abstract class AbstractGenericTest extends AbstractGTest {
 	/**
 	 * Finds the button with the indicated NAME that is a subcomponent of the
 	 * indicated container, and then programmatically presses the button.
-	 * 
+	 *
 	 * @param container the container to search. (Typically a dialog.)
 	 * @param buttonName the name on the desired AbstractButton (see
 	 *            Component.setName()).
@@ -721,7 +735,7 @@ public abstract class AbstractGenericTest extends AbstractGTest {
 
 	/**
 	 * Programmatically presses the indicated button.
-	 * 
+	 *
 	 * @param button the button
 	 */
 	public static void pressButton(AbstractButton button) {
@@ -733,7 +747,7 @@ public abstract class AbstractGenericTest extends AbstractGTest {
 
 	/**
 	 * Programmatically presses the indicated button.
-	 * 
+	 *
 	 * @param button the button
 	 * @param waitForCompletion if true wait for action to complete before
 	 *            returning, otherwise schedule action to be performed and
@@ -842,7 +856,7 @@ public abstract class AbstractGenericTest extends AbstractGTest {
 	/**
 	 * Searches the subcomponents of the the given container and returns the
 	 * JButton that has the specified text.
-	 * 
+	 *
 	 * @param container the container to search
 	 * @param text the button text
 	 * @return the JButton, or null the button was not found
@@ -942,7 +956,7 @@ public abstract class AbstractGenericTest extends AbstractGTest {
 
 	/**
 	 * Simulates click the mouse button.
-	 * 
+	 *
 	 * @param comp the component to click on.
 	 * @param button the mouse button (1, 2, or 3)
 	 * @param x the x coordinate of the click location
@@ -955,22 +969,21 @@ public abstract class AbstractGenericTest extends AbstractGTest {
 	public static void clickMouse(Component comp, int button, int x, int y, int clickCount,
 			int modifiers, boolean popupTrigger) {
 
-		int updatedModifiers = convertToExtendedModifiers(modifiers, button);
-
+		int nonRelesedModifiers = convertToExtendedModifiers(modifiers, button, false);
+		int relesedModifiers = convertToExtendedModifiers(modifiers, button, true);
 		for (int cnt = 1; cnt <= clickCount; ++cnt) {
-
 			postEvent(new MouseEvent(comp, MouseEvent.MOUSE_PRESSED, System.currentTimeMillis(),
-				updatedModifiers, x, y, cnt, false, button));
+				nonRelesedModifiers, x, y, cnt, false, button));
 			postEvent(new MouseEvent(comp, MouseEvent.MOUSE_CLICKED, System.currentTimeMillis(),
-				updatedModifiers, x, y, cnt, false, button));
+				nonRelesedModifiers, x, y, cnt, false, button));
 			postEvent(new MouseEvent(comp, MouseEvent.MOUSE_RELEASED, System.currentTimeMillis(),
-				updatedModifiers, x, y, cnt, popupTrigger, button));
+				relesedModifiers, x, y, cnt, popupTrigger, button));
 		}
 	}
 
 	/**
 	 * Simulates click the mouse button.
-	 * 
+	 *
 	 * @param comp the component to click on.
 	 * @param button the mouse button (1, 2, or 3)
 	 * @param x the x coordinate of the click location
@@ -986,7 +999,7 @@ public abstract class AbstractGenericTest extends AbstractGTest {
 
 	/**
 	 * Simulates a mouse drag action
-	 * 
+	 *
 	 * @param comp the component to drag on.
 	 * @param button the mouse button (1, 2, or 3)
 	 * @param startX the x coordinate of the start drag location
@@ -998,19 +1011,20 @@ public abstract class AbstractGenericTest extends AbstractGTest {
 	public static void dragMouse(final Component comp, int button, final int startX,
 			final int startY, final int endX, final int endY, int modifiers) {
 
-		int updateModifiers = convertToExtendedModifiers(modifiers, button);
+		int nonRelesedModifiers = convertToExtendedModifiers(modifiers, button, false);
+		int relesedModifiers = convertToExtendedModifiers(modifiers, button, true);
 		postEvent(new MouseEvent(comp, MouseEvent.MOUSE_PRESSED, System.currentTimeMillis(),
-			updateModifiers, startX, startY, 1, false, button));
+			nonRelesedModifiers, startX, startY, 1, false, button));
 		postEvent(new MouseEvent(comp, MouseEvent.MOUSE_DRAGGED, System.currentTimeMillis(),
-			updateModifiers, endX, endY, 1, false, button));
+			nonRelesedModifiers, endX, endY, 1, false, button));
 		postEvent(new MouseEvent(comp, MouseEvent.MOUSE_RELEASED, System.currentTimeMillis(),
-			updateModifiers, endX, endY, 1, false, button));
+			relesedModifiers, endX, endY, 1, false, button));
 
 	}
 
 	/**
 	 * Fire a mouse moved event for the given component.
-	 * 
+	 *
 	 * @param comp source of the event.
 	 * @param x x position relative to the component
 	 * @param y y position relative to the component
@@ -1022,7 +1036,7 @@ public abstract class AbstractGenericTest extends AbstractGTest {
 	}
 
 	@SuppressWarnings("deprecation")
-	private static int convertToExtendedModifiers(int modifiers, int button) {
+	private static int convertToExtendedModifiers(int modifiers, int button, boolean isRelease) {
 
 		// TODO: Eliminate duplication of similar modifier modification logic
 		// which exists in KeyBindingData
@@ -1061,16 +1075,22 @@ public abstract class AbstractGenericTest extends AbstractGTest {
 			modifiers = modifiers | InputEvent.META_DOWN_MASK;
 		}
 
-		switch (button) {
-			case 1:
-				modifiers |= InputEvent.BUTTON1_DOWN_MASK;
-				break;
-			case 2:
-				modifiers |= InputEvent.BUTTON2_DOWN_MASK;
-				break;
-			case 3:
-				modifiers |= InputEvent.BUTTON3_DOWN_MASK;
-				break;
+		if (!isRelease) {
+			//
+			// There are no mouse buttons down on a 'release' in Java's extended event processing.
+			// (The original non-extended events did include the button in the release event.)
+			//
+			switch (button) {
+				case 1:
+					modifiers |= InputEvent.BUTTON1_DOWN_MASK;
+					break;
+				case 2:
+					modifiers |= InputEvent.BUTTON2_DOWN_MASK;
+					break;
+				case 3:
+					modifiers |= InputEvent.BUTTON3_DOWN_MASK;
+					break;
+			}
 		}
 		return modifiers;
 	}
@@ -1109,9 +1129,9 @@ public abstract class AbstractGenericTest extends AbstractGTest {
 	/**
 	 * Run the given code snippet on the Swing thread later, not blocking the current thread.  Use
 	 * this if the code snippet causes a blocking operation.
-	 * 
+	 *
 	 * <P>This is a shortcut for <code>runSwing(r, false);</code>.
-	 * 
+	 *
 	 * @param r the runnable code snippet
 	 */
 	public void runSwingLater(Runnable r) {
@@ -1121,7 +1141,7 @@ public abstract class AbstractGenericTest extends AbstractGTest {
 	/**
 	 * Call this version of {@link #runSwing(Runnable)} when you expect your runnable <b>may</b>
 	 * throw exceptions
-	 * 
+	 *
 	 * @param callback the runnable code snippet to call
 	 * @throws Exception any exception that is thrown on the Swing thread
 	 */
@@ -1243,14 +1263,18 @@ public abstract class AbstractGenericTest extends AbstractGTest {
 			try {
 				doRun(swingExceptionCatcher);
 			}
-			catch (InterruptedException | InvocationTargetException e) {
-				// Assume that if we have an exception reported by our catcher, then that is
-				// the root cause of this exception and do not report this one.   The typical
-				// exception here is an InterrruptedException that is caused by our test
-				// harness when it is interrupting the test thread after a previous Swing
-				// exception that we have detected--we don't care to report the
-				// InterruptedException, as we caused it.  The InvocationTargetException should
-				// be handled by our runnable above.
+			catch (InterruptedException e) {
+				// Typically, this InterrruptedException that is caused by our test harness when it
+				// is interrupting the test thread after a previous Swing exception that we have
+				// detected--we don't care to throw the InterruptedException, as we caused it.
+				// Log a message to signal that unusual things may happen when in this state.
+				Msg.debug(this, "\n>>>>>>>>>>>>>>>> Test thread interrupted.  Unusual/unexpected " +
+					"errors may follow.\n\n");
+			}
+			catch (InvocationTargetException e) {
+				// Assume that if we have an exception reported by our catcher above, then that is
+				// the root cause of this exception and do not report this one.   This should not
+				// happen, as we are catching the exception above.
 			}
 		}
 
@@ -1348,7 +1372,7 @@ public abstract class AbstractGenericTest extends AbstractGTest {
 	/**
 	 * Clicks a range of items in a list (simulates holding SHIFT and selecting
 	 * each item in the range in-turn)
-	 * 
+	 *
 	 * @param list the list to select from
 	 * @param row the initial index
 	 * @param count the number of rows to select
@@ -1366,7 +1390,7 @@ public abstract class AbstractGenericTest extends AbstractGTest {
 	/**
 	 * Clicks a range of items in a table (simulates holding SHIFT and selecting
 	 * each item in the range)
-	 * 
+	 *
 	 * @param table the table to select
 	 * @param row the starting row index
 	 * @param count the number of rows to select
@@ -1384,7 +1408,10 @@ public abstract class AbstractGenericTest extends AbstractGTest {
 	public static TableCellEditor editCell(final JTable table, final int row, final int col) {
 
 		waitForSwing();
+
 		runSwing(() -> table.setRowSelectionInterval(row, row));
+		waitForSwing();
+
 		runSwing(() -> table.editCellAt(row, col));
 		waitForSwing();
 
@@ -1396,7 +1423,7 @@ public abstract class AbstractGenericTest extends AbstractGTest {
 	/**
 	 * Gets the rendered value for the specified table cell.  The actual value at the cell may
 	 * not be a String.  This method will get the String display value, as created by the table.
-	 * 
+	 *
 	 * @param table the table to query
 	 * @param row the row to query
 	 * @param column the column to query
@@ -1444,7 +1471,7 @@ public abstract class AbstractGenericTest extends AbstractGTest {
 	 * Note: This method affects the expansion state of the tree. It will expand
 	 * nodes starting at the root until a match is found or all of the tree is
 	 * checked.
-	 * 
+	 *
 	 * @param tree the tree
 	 * @param text the tree node's text
 	 * @return the tree path
@@ -1458,7 +1485,7 @@ public abstract class AbstractGenericTest extends AbstractGTest {
 
 	/**
 	 * Performs a depth first search for the named tree node.
-	 * 
+	 *
 	 * @param tree the tree to search
 	 * @param startTreePath path indicating node to begin searching from in the
 	 *            tree
@@ -1490,7 +1517,7 @@ public abstract class AbstractGenericTest extends AbstractGTest {
 	/**
 	 * Returns a string which is a printout of a stack trace for each thread
 	 * running in the current JVM
-	 * 
+	 *
 	 * @return the stack trace string
 	 */
 	public static String createStackTraceForAllThreads() {
@@ -1500,7 +1527,7 @@ public abstract class AbstractGenericTest extends AbstractGTest {
 	/**
 	 * Prints the contents of the given collection by way of the
 	 * {@link Object#toString()} method.
-	 * 
+	 *
 	 * @param collection The contents of which to print
 	 * @return A string representation of the given collection
 	 */
@@ -1795,14 +1822,17 @@ public abstract class AbstractGenericTest extends AbstractGTest {
 
 		// ghidra.test.property.report.dir
 		// Possible Values:
-		// server:	     {share dir}/junits.new/JunitTest_version/reports
-		// local gradle: {user home}/git/{repo}/ghidra/build/JUnit/reports
-		// eclipse:      {module}/bin/
+		// server        {share dir}/reports/{type}/{branch}/{date}/
+		// local gradle: {repo}/Ghidra/{module}/build/JUnit/reports
+		// eclipse:      {repo}/Ghidra/{module}/bin/
 		// build:        unsupported
 
+		// we add to the above directory a single dir value of 'debug'
+
+		String debugDirName = "debug";
 		String dirPath = System.getProperty(GHIDRA_TEST_PROPERTY_REPORT_DIR);
 		if (dirPath != null) { // running from gradle
-			debugDirectory = new File(dirPath);
+			debugDirectory = new File(dirPath, debugDirName);
 		}
 		else { // running from Eclipse
 
@@ -1810,7 +1840,7 @@ public abstract class AbstractGenericTest extends AbstractGTest {
 			// reports, nor do we have a build directory.  'bin' is the closest thing to that.
 			ResourceFile moduleDir = Application.getMyModuleRootDirectory();
 			ResourceFile binDir = new ResourceFile(moduleDir, "bin");
-			debugDirectory = binDir.getFile(false);
+			debugDirectory = new File(binDir.getFile(false), debugDirName);
 		}
 
 		return debugDirectory;
@@ -1823,7 +1853,7 @@ public abstract class AbstractGenericTest extends AbstractGTest {
 	 * {@link Files#createTempDirectory(Path, String, java.nio.file.attribute.FileAttribute...)}.
 	 * Any left-over test directories will be cleaned-up before creating the new
 	 * directory.
-	 * 
+	 *
 	 * <p>
 	 * Note: you should not call this method multiple times, as each call will
 	 * cleanup the previously created directories.
@@ -1857,7 +1887,7 @@ public abstract class AbstractGenericTest extends AbstractGTest {
 	 * Creates a file path with a filename that is under the system temp
 	 * directory. The path returned will not point to an existing file. The
 	 * suffix of the file will be <code>.tmp</code>.
-	 * 
+	 *
 	 * @param name the filename
 	 * @return a new file path
 	 * @throws IOException if there is any problem ensuring that the created
@@ -1874,7 +1904,7 @@ public abstract class AbstractGenericTest extends AbstractGTest {
 	 * directory. The path returned will not point to an existing file. This
 	 * method is the same as {@link #createTempFilePath(String)}, except that
 	 * you must provide the extension.
-	 * 
+	 *
 	 * @param name the filename
 	 * @param extension the file extension
 	 * @return a new file path
@@ -1893,7 +1923,7 @@ public abstract class AbstractGenericTest extends AbstractGTest {
 	 * for the filename. This method calls {@link #createTempFile(String)},
 	 * which will cleanup any pre-existing temp files whose name pattern matches
 	 * this test name. This helps to avoid old temp files from accumulating.
-	 * 
+	 *
 	 * @return the new temp file
 	 * @throws IOException if there is a problem creating the new file
 	 */
@@ -1906,7 +1936,7 @@ public abstract class AbstractGenericTest extends AbstractGTest {
 	 * for the filename. This method calls {@link #createTempFile(String)},
 	 * which will cleanup any pre-existing temp files whose name pattern matches
 	 * this test name. This helps to avoid old temp files from accumulating.
-	 * 
+	 *
 	 * @param suffix the suffix to provide for the temp file
 	 * @return the new temp file
 	 * @throws IOException if there is a problem creating the new file

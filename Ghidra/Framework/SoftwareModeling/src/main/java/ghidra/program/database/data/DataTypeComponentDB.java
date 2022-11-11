@@ -18,7 +18,7 @@ package ghidra.program.database.data;
 import java.io.IOException;
 
 import db.DBRecord;
-import ghidra.docking.settings.Settings;
+import ghidra.docking.settings.*;
 import ghidra.program.model.data.*;
 import ghidra.util.SystemUtilities;
 import ghidra.util.exception.DuplicateNameException;
@@ -40,7 +40,7 @@ class DataTypeComponentDB implements InternalDataTypeComponent {
 	private int ordinal;
 	private int offset;
 	private int length;
-	private SettingsDBManager defaultSettings;
+	private Settings defaultSettings;
 
 	/**
 	 * Construct an immutable component not backed by a record with a specified datatype and length.
@@ -182,28 +182,20 @@ class DataTypeComponentDB implements InternalDataTypeComponent {
 		return null;
 	}
 
-	@Override
-	public Settings getDefaultSettings() {
-		if (defaultSettings == null) {
-			if (record != null) {
-				defaultSettings = new SettingsDBManager(dataMgr, this, record.getKey());
-			}
-			else {
-				return getDataType().getDefaultSettings();
-			}
-		}
-		return defaultSettings;
-
+	private boolean hasSettings() {
+		return record != null && dataMgr.allowsDefaultComponentSettings() &&
+			getDataType().getSettingsDefinitions().length != 0;
 	}
 
 	@Override
-	public void setDefaultSettings(Settings settings) {
-		if (record != null) {
-			if (defaultSettings == null) {
-				defaultSettings = new SettingsDBManager(dataMgr, this, record.getKey());
-			}
-			defaultSettings.update(settings);
+	public Settings getDefaultSettings() {
+		if (!hasSettings()) {
+			return SettingsImpl.NO_SETTINGS;
 		}
+		if (defaultSettings == null) {
+			defaultSettings = new ComponentDBSettings();
+		}
+		return defaultSettings;
 	}
 
 	@Override
@@ -228,15 +220,7 @@ class DataTypeComponentDB implements InternalDataTypeComponent {
 	@Override
 	public void setFieldName(String name) throws DuplicateNameException {
 		if (record != null) {
-			if (name != null) {
-				name = name.trim();
-				if (name.length() == 0 || name.equals(getDefaultFieldName())) {
-					name = null;
-				}
-				else {
-					checkDuplicateName(name);
-				}
-			}
+			name = checkFieldName(name);
 			record.setString(ComponentDBAdapter.COMPONENT_FIELD_NAME_COL, name);
 			updateRecord(true);
 		}
@@ -252,6 +236,19 @@ class DataTypeComponentDB implements InternalDataTypeComponent {
 				throw new DuplicateNameException("Duplicate field name: " + name);
 			}
 		}
+	}
+
+	private String checkFieldName(String name) throws DuplicateNameException {
+		if (name != null) {
+			name = name.trim();
+			if (name.length() == 0 || name.equals(getDefaultFieldName())) {
+				name = null;
+			}
+			else {
+				checkDuplicateName(name);
+			}
+		}
+		return name;
 	}
 
 	@Override
@@ -400,9 +397,27 @@ class DataTypeComponentDB implements InternalDataTypeComponent {
 		return record;
 	}
 
+	/**
+	 * Perform special-case component update that does not result in size or alignment changes. 
+	 * @param name new component name
+	 * @param dt new resolved datatype
+	 * @param cmt new comment
+	 */
+	void update(String name, DataType dt, String cmt) {
+		if (record != null) {
+			// TODO: Need to check field name and throw DuplicateNameException
+			// name = checkFieldName(name);
+			record.setString(ComponentDBAdapter.COMPONENT_FIELD_NAME_COL, name);
+			record.setLongValue(ComponentDBAdapter.COMPONENT_DT_ID_COL,
+				dataMgr.getResolvedID(dt));
+			record.setString(ComponentDBAdapter.COMPONENT_COMMENT_COL, cmt);
+			updateRecord(false);
+		}
+	}
+
 	@Override
 	public void setDataType(DataType newDt) {
-		// intended for internal use only
+		// intended for internal use only - note exsiting settings should be preserved
 		if (record != null) {
 			record.setLongValue(ComponentDBAdapter.COMPONENT_DT_ID_COL,
 				dataMgr.getResolvedID(newDt));
@@ -421,5 +436,119 @@ class DataTypeComponentDB implements InternalDataTypeComponent {
 	 */
 	boolean isUndefined() {
 		return record == null && cachedDataType == null;
+	}
+
+	private class ComponentDBSettings implements Settings {
+		//
+		// Settings
+		//
+		// NOTE: Since this is not a DatabaseObject there is the possibility that
+		// a setting could be made on a stale component if a concurrent modification 
+		// occurs.  Component objects must be discarded anytime the parent composite
+		// is modified.
+		//
+
+		private void settingsChanged() {
+			// NOTE: Merge currently only supports TypeDefDB default settings changes which correspond
+			// to TypeDefSettingsDefinition established by the base datatype
+			// and does not consider DataTypeComponent default settings changes or other setting types.
+			dataMgr.dataTypeChanged(getParent(), false);
+		}
+
+		@Override
+		public boolean isChangeAllowed(SettingsDefinition settingsDefinition) {
+			if (settingsDefinition instanceof TypeDefSettingsDefinition) {
+				return false;
+			}
+			for (SettingsDefinition def : getDataType().getSettingsDefinitions()) {
+				if (def.equals(settingsDefinition)) {
+					return true;
+				}
+			}
+			return false;
+		}
+
+		@Override
+		public Long getLong(String name) {
+			SettingDB settingDB = dataMgr.getSetting(record.getKey(), name);
+			if (settingDB != null) {
+				return settingDB.getLongValue();
+			}
+			return getDataType().getDefaultSettings().getLong(name);
+		}
+
+		@Override
+		public String getString(String name) {
+			SettingDB settingDB = dataMgr.getSetting(record.getKey(), name);
+			if (settingDB != null) {
+				return settingDB.getStringValue();
+			}
+			return getDataType().getDefaultSettings().getString(name);
+		}
+
+		@Override
+		public Object getValue(String name) {
+			SettingDB settingDB = dataMgr.getSetting(record.getKey(), name);
+			if (settingDB != null) {
+				return settingDB.getValue();
+			}
+			return getDataType().getDefaultSettings().getValue(name);
+		}
+
+		@Override
+		public void setLong(String name, long value) {
+			if (dataMgr.updateSettingsRecord(record.getKey(), name, null, value)) {
+				settingsChanged();
+			}
+		}
+
+		@Override
+		public void setString(String name, String value) {
+			if (dataMgr.updateSettingsRecord(record.getKey(), name, value, -1)) {
+				settingsChanged();
+			}
+		}
+
+		@Override
+		public void setValue(String name, Object value) {
+			if (value instanceof Long) {
+				setLong(name, ((Long) value).longValue());
+			}
+			else if (value instanceof String) {
+				setString(name, (String) value);
+			}
+			else {
+				throw new IllegalArgumentException("Value is not a known settings type: " + name);
+			}
+		}
+
+		@Override
+		public void clearSetting(String name) {
+			if (dataMgr.clearSetting(record.getKey(), name)) {
+				settingsChanged();
+			}
+		}
+
+		@Override
+		public void clearAllSettings() {
+			if (dataMgr.clearAllSettings(record.getKey())) {
+				settingsChanged();
+			}
+		}
+
+		@Override
+		public String[] getNames() {
+			return dataMgr.getSettingsNames(record.getKey());
+		}
+
+		@Override
+		public boolean isEmpty() {
+			return getNames().length == 0;
+		}
+
+		@Override
+		public Settings getDefaultSettings() {
+			return getDataType().getDefaultSettings();
+		}
 	}
 }

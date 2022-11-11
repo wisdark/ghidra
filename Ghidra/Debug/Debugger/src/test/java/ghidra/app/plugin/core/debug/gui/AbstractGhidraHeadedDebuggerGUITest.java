@@ -25,8 +25,7 @@ import java.io.IOException;
 import java.math.BigInteger;
 import java.nio.file.Files;
 import java.util.*;
-import java.util.concurrent.CompletableFuture;
-import java.util.concurrent.TimeUnit;
+import java.util.concurrent.*;
 import java.util.concurrent.atomic.AtomicReference;
 import java.util.function.Supplier;
 
@@ -41,11 +40,14 @@ import org.junit.runner.Description;
 import docking.ActionContext;
 import docking.action.ActionContextProvider;
 import docking.action.DockingActionIf;
+import docking.widgets.table.DynamicTableColumn;
 import docking.widgets.tree.GTree;
 import docking.widgets.tree.GTreeNode;
 import generic.Unique;
 import ghidra.app.nav.Navigatable;
 import ghidra.app.plugin.core.debug.gui.action.*;
+import ghidra.app.plugin.core.debug.gui.model.ObjectTableModel.ValueRow;
+import ghidra.app.plugin.core.debug.gui.model.columns.TraceValueObjectPropertyColumn;
 import ghidra.app.plugin.core.debug.mapping.*;
 import ghidra.app.plugin.core.debug.service.model.*;
 import ghidra.app.plugin.core.debug.service.tracemgr.DebuggerTraceManagerServicePlugin;
@@ -54,8 +56,9 @@ import ghidra.app.util.viewer.listingpanel.ListingPanel;
 import ghidra.dbg.model.AbstractTestTargetRegisterBank;
 import ghidra.dbg.model.TestDebuggerModelBuilder;
 import ghidra.dbg.target.*;
-import ghidra.framework.model.DomainFile;
-import ghidra.framework.model.DomainObject;
+import ghidra.dbg.testutil.DebuggerModelTestUtils;
+import ghidra.docking.settings.SettingsImpl;
+import ghidra.framework.model.*;
 import ghidra.framework.plugintool.PluginTool;
 import ghidra.program.database.ProgramDB;
 import ghidra.program.model.address.*;
@@ -68,7 +71,7 @@ import ghidra.test.TestEnv;
 import ghidra.trace.database.ToyDBTraceBuilder;
 import ghidra.trace.model.*;
 import ghidra.trace.model.Trace.TraceMemoryBytesChangeType;
-import ghidra.trace.model.memory.TraceMemoryRegisterSpace;
+import ghidra.trace.model.memory.TraceMemorySpace;
 import ghidra.trace.model.thread.TraceThread;
 import ghidra.trace.util.TraceAddressSpace;
 import ghidra.util.InvalidNameException;
@@ -78,7 +81,7 @@ import ghidra.util.exception.CancelledException;
 import ghidra.util.task.ConsoleTaskMonitor;
 
 public abstract class AbstractGhidraHeadedDebuggerGUITest
-		extends AbstractGhidraHeadedIntegrationTest {
+		extends AbstractGhidraHeadedIntegrationTest implements DebuggerModelTestUtils {
 
 	public static final String LANGID_TOYBE64 = "Toy:BE:64:default";
 
@@ -280,7 +283,7 @@ public abstract class AbstractGhidraHeadedDebuggerGUITest
 	}
 
 	protected static Set<String> getMenuElementsText() {
-		MenuElement[] sel = MenuSelectionManager.defaultManager().getSelectedPath();
+		MenuElement[] sel = runSwing(() -> MenuSelectionManager.defaultManager().getSelectedPath());
 		if (sel == null || sel.length == 0) {
 			return Set.of();
 		}
@@ -301,7 +304,7 @@ public abstract class AbstractGhidraHeadedDebuggerGUITest
 	}
 
 	protected static MenuElement getSubMenuElementByText(String text) {
-		MenuElement[] sel = MenuSelectionManager.defaultManager().getSelectedPath();
+		MenuElement[] sel = runSwing(() -> MenuSelectionManager.defaultManager().getSelectedPath());
 		if (sel == null || sel.length == 0) {
 			throw new NoSuchElementException("No menu is active");
 		}
@@ -454,8 +457,15 @@ public abstract class AbstractGhidraHeadedDebuggerGUITest
 
 	protected static void performEnabledAction(ActionContextProvider provider,
 			DockingActionIf action, boolean wait) {
-		ActionContext context = provider.getActionContext(null);
-		waitForCondition(() -> action.isEnabledForContext(context));
+		ActionContext context = waitForValue(() -> {
+			ActionContext ctx = provider == null
+					? new ActionContext()
+					: provider.getActionContext(null);
+			if (!action.isEnabledForContext(ctx)) {
+				return null;
+			}
+			return ctx;
+		});
 		performAction(action, context, wait);
 	}
 
@@ -480,20 +490,26 @@ public abstract class AbstractGhidraHeadedDebuggerGUITest
 		runSwing(() -> nav.setSelection(sel));
 	}
 
+	protected Object rowColVal(ValueRow row, DynamicTableColumn<ValueRow, ?, Trace> col) {
+		if (col instanceof TraceValueObjectPropertyColumn<?> attrCol) {
+			return attrCol.getValue(row, SettingsImpl.NO_SETTINGS, tb.trace, tool).getValue();
+		}
+		Object value = col.getValue(row, SettingsImpl.NO_SETTINGS, tb.trace, tool);
+		return value;
+	}
+
+	protected <T> String rowColDisplay(ValueRow row, DynamicTableColumn<ValueRow, T, Trace> col) {
+		T value = col.getValue(row, SettingsImpl.NO_SETTINGS, tb.trace, tool);
+		return col.getColumnRenderer().getFilterString(value, SettingsImpl.NO_SETTINGS);
+	}
+
 	protected static LocationTrackingSpec getLocationTrackingSpec(String name) {
-		return LocationTrackingSpec.fromConfigName(name);
+		return LocationTrackingSpecFactory.fromConfigName(name);
 	}
 
 	protected static AutoReadMemorySpec getAutoReadMemorySpec(String name) {
 		return AutoReadMemorySpec.fromConfigName(name);
 	}
-
-	protected final LocationTrackingSpec trackNone =
-		getLocationTrackingSpec(NoneLocationTrackingSpec.CONFIG_NAME);
-	protected final LocationTrackingSpec trackPc =
-		getLocationTrackingSpec(PCLocationTrackingSpec.CONFIG_NAME);
-	protected final LocationTrackingSpec trackSp =
-		getLocationTrackingSpec(SPLocationTrackingSpec.CONFIG_NAME);
 
 	protected final AutoReadMemorySpec readNone =
 		getAutoReadMemorySpec(NoneAutoReadMemorySpec.CONFIG_NAME);
@@ -527,6 +543,25 @@ public abstract class AbstractGhidraHeadedDebuggerGUITest
 	};
 	protected ConsoleTaskMonitor monitor = new ConsoleTaskMonitor();
 
+	protected void waitRecorder(TraceRecorder recorder) throws Throwable {
+		if (recorder == null) {
+			return;
+		}
+		try {
+			waitOn(recorder.getTarget().getModel().flushEvents());
+		}
+		catch (RejectedExecutionException e) {
+			// Whatever
+		}
+		try {
+			waitOn(recorder.flushTransactions());
+		}
+		catch (RejectedExecutionException e) {
+			// Whatever
+		}
+		waitForDomainObject(recorder.getTrace());
+	}
+
 	@Before
 	public void setUp() throws Exception {
 		ListenerMap.clearErr();
@@ -552,7 +587,13 @@ public abstract class AbstractGhidraHeadedDebuggerGUITest
 
 	@After
 	public void tearDown() {
-		runSwing(() -> traceManager.setSaveTracesByDefault(false));
+		waitForTasks();
+		runSwing(() -> {
+			if (traceManager == null) {
+				return;
+			}
+			traceManager.setSaveTracesByDefault(false);
+		});
 
 		if (tb != null) {
 			if (traceManager != null && traceManager.getOpenTraces().contains(tb.trace)) {
@@ -575,6 +616,8 @@ public abstract class AbstractGhidraHeadedDebuggerGUITest
 			program.release(this);
 		}
 
+		waitForTasks();
+
 		env.dispose();
 	}
 
@@ -583,13 +626,53 @@ public abstract class AbstractGhidraHeadedDebuggerGUITest
 		modelService.addModel(mb.testModel);
 	}
 
+	protected void populateTestModel() throws Throwable {
+		mb.createTestProcessesAndThreads();
+		// NOTE: Test mapper uses TOYBE64
+		mb.testProcess1.regs.addRegistersFromLanguage(getToyBE64Language(),
+			Register::isBaseRegister);
+		mb.createTestThreadRegisterBanks();
+		mb.testProcess1.addRegion(".text", mb.rng(0x00400000, 0x00401000), "rx");
+		mb.testProcess1.addRegion(".data", mb.rng(0x00600000, 0x00601000), "rw");
+	}
+
+	protected TargetObject chooseTarget() {
+		return mb.testProcess1;
+	}
+
+	protected TraceRecorder recordAndWaitSync() throws Throwable {
+		createTestModel();
+		populateTestModel();
+
+		TargetObject target = chooseTarget();
+		TraceRecorder recorder = modelService.recordTarget(target,
+			createTargetTraceMapper(target), ActionSource.AUTOMATIC);
+
+		waitRecorder(recorder);
+		return recorder;
+	}
+
 	protected void nop() {
 	}
 
-	protected void intoProject(DomainObject obj)
-			throws InvalidNameException, CancelledException, IOException {
+	protected void intoProject(DomainObject obj) {
 		waitForDomainObject(obj);
-		tool.getProject().getProjectData().getRootFolder().createFile(obj.getName(), obj, monitor);
+		DomainFolder rootFolder = tool.getProject()
+				.getProjectData()
+				.getRootFolder();
+		waitForCondition(() -> {
+			try {
+				rootFolder.createFile(obj.getName(), obj, monitor);
+				return true;
+			}
+			catch (InvalidNameException | CancelledException e) {
+				throw new AssertionError(e);
+			}
+			catch (IOException e) {
+				// Usually "object is busy". Try again.
+				return false;
+			}
+		});
 	}
 
 	protected void createSnaplessTrace(String langID) throws IOException {
@@ -673,7 +756,7 @@ public abstract class AbstractGhidraHeadedDebuggerGUITest
 		program = new ProgramDB("static-" + name.getMethodName(), lang,
 			lang.getDefaultCompilerSpec(), this);
 		try (UndoableTransaction tid =
-			UndoableTransaction.start(program, "Set Executable Path", true)) {
+			UndoableTransaction.start(program, "Set Executable Path")) {
 			program.setExecutablePath(path);
 		}
 		programManager.openProgram(program);
@@ -697,7 +780,7 @@ public abstract class AbstractGhidraHeadedDebuggerGUITest
 				if (space.getThread() != traceThread) {
 					return;
 				}
-				TraceMemoryRegisterSpace regSpace =
+				TraceMemorySpace regSpace =
 					trace.getMemoryManager().getMemoryRegisterSpace(traceThread, false);
 				assertNotNull(regSpace);
 				for (Map.Entry<String, byte[]> ent : values.entrySet()) {

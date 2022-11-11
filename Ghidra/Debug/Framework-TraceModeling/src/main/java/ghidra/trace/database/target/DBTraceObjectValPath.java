@@ -22,11 +22,17 @@ import ghidra.dbg.util.PathUtils.PathComparator;
 import ghidra.trace.model.target.*;
 
 public class DBTraceObjectValPath implements TraceObjectValPath {
-	static DBTraceObjectValPath of(Collection<InternalTraceObjectValue> entryList) {
+	public static final DBTraceObjectValPath EMPTY = new DBTraceObjectValPath(List.of());
+
+	public static DBTraceObjectValPath of() {
+		return EMPTY;
+	}
+
+	public static DBTraceObjectValPath of(Collection<InternalTraceObjectValue> entryList) {
 		return new DBTraceObjectValPath(List.copyOf(entryList));
 	}
 
-	static DBTraceObjectValPath of(InternalTraceObjectValue... entries) {
+	public static DBTraceObjectValPath of(InternalTraceObjectValue... entries) {
 		return DBTraceObjectValPath.of(Arrays.asList(entries));
 	}
 
@@ -66,6 +72,7 @@ public class DBTraceObjectValPath implements TraceObjectValPath {
 		return entryList.contains(entry);
 	}
 
+	@Override
 	public DBTraceObjectValPath prepend(TraceObjectValue entry) {
 		InternalTraceObjectValue[] arr = new InternalTraceObjectValue[1 + entryList.size()];
 		arr[0] = (DBTraceObjectValue) entry;
@@ -93,7 +100,7 @@ public class DBTraceObjectValPath implements TraceObjectValPath {
 	}
 
 	@Override
-	public TraceObject getFirstParent(TraceObject ifEmpty) {
+	public TraceObject getSource(TraceObject ifEmpty) {
 		InternalTraceObjectValue first = getFirstEntry();
 		return first == null ? ifEmpty : first.getParent();
 	}
@@ -107,13 +114,13 @@ public class DBTraceObjectValPath implements TraceObjectValPath {
 	}
 
 	@Override
-	public Object getLastValue(Object ifEmpty) {
+	public Object getDestinationValue(Object ifEmpty) {
 		InternalTraceObjectValue last = getLastEntry();
 		return last == null ? ifEmpty : last.getValue();
 	}
 
 	@Override
-	public TraceObject getLastChild(TraceObject ifEmpty) {
+	public TraceObject getDestination(TraceObject ifEmpty) {
 		InternalTraceObjectValue last = getLastEntry();
 		return last == null ? ifEmpty : last.getChild();
 	}

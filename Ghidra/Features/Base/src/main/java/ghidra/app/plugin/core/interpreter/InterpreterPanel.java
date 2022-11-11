@@ -76,6 +76,7 @@ public class InterpreterPanel extends JPanel implements OptionsChangeListener {
 
 	private CompletionWindowTrigger completionWindowTrigger = CompletionWindowTrigger.TAB;
 	private boolean highlightCompletion = false;
+	private int completionInsertionPosition;
 
 	private boolean caretGuard = true;
 	private PluginTool tool;
@@ -482,9 +483,13 @@ public class InterpreterPanel extends JPanel implements OptionsChangeListener {
 				return;
 			}
 
+			// We save the position of the caret here in advance because the user can move it
+			// later (but before the insertion takes place) and make the completions invalid.
+			completionInsertionPosition = inputTextPane.getCaretPosition();
+
 			String text = getInputTextPaneText();
-			List<CodeCompletion> completions =
-				InterpreterPanel.this.interpreter.getCompletions(text);
+			List<CodeCompletion> completions = InterpreterPanel.this.interpreter.getCompletions(
+				text, completionInsertionPosition);
 			completionWindow.updateCompletionList(completions);
 		});
 	}
@@ -513,27 +518,34 @@ public class InterpreterPanel extends JPanel implements OptionsChangeListener {
 	}
 
 	private void repositionScrollpane() {
-		// NOTE:  CRAZY CODE!  subtract one to position short of final newline
-		outputTextPane.setCaretPosition(Math.max(0, outputTextPane.getDocument().getLength() - 1));
+		outputTextPane.setCaretPosition(Math.max(0, outputTextPane.getDocument().getLength()));
 	}
+
+	AnsiRenderer stdErrRenderer = new AnsiRenderer();
+	AnsiRenderer stdInRenderer = new AnsiRenderer();
+	AnsiRenderer stdOutRenderer = new AnsiRenderer();
 
 	void addText(String text, TextType type) {
 		SimpleAttributeSet attributes;
+		AnsiRenderer renderer;
 		switch (type) {
 			case STDERR:
+				renderer = stdErrRenderer;
 				attributes = STDERR_SET;
 				break;
 			case STDIN:
+				renderer = stdInRenderer;
 				attributes = STDIN_SET;
 				break;
 			case STDOUT:
 			default:
+				renderer = stdOutRenderer;
 				attributes = STDOUT_SET;
 				break;
 		}
 		try {
 			StyledDocument document = outputTextPane.getStyledDocument();
-			document.insertString(document.getLength(), text, attributes);
+			renderer.renderString(document, text, attributes);
 			repositionScrollpane();
 		}
 		catch (BadLocationException e) {
@@ -613,20 +625,27 @@ public class InterpreterPanel extends JPanel implements OptionsChangeListener {
 		}
 
 		String text = getInputTextPaneText();
-		int position = inputTextPane.getCaretPosition();
+		int position = completionInsertionPosition;
 		String insertion = completion.getInsertion();
 
 		/* insert completion string */
-		setInputTextPaneText(text.substring(0, position) + insertion + text.substring(position));
+		int insertedTextStart = Math.max(0, position - completion.getCharsToRemove());
+		int insertedTextEnd = insertedTextStart + insertion.length();
+		String inputText =
+			text.substring(0, insertedTextStart) + insertion + text.substring(position);
+		setInputTextPaneText(inputText);
 
 		/* Select what we inserted so that the user can easily
 		 * get rid of what they did (in case of a mistake). */
 		if (highlightCompletion) {
-			inputTextPane.setSelectionStart(position);
+			inputTextPane.setSelectionStart(insertedTextStart);
+			inputTextPane.moveCaretPosition(insertedTextEnd);
+		}
+		else {
+			/* Then put the caret right after what we inserted. */
+			inputTextPane.setCaretPosition(insertedTextEnd);
 		}
 
-		/* Then put the caret right after what we inserted. */
-		inputTextPane.moveCaretPosition(position + insertion.length());
 		updateCompletionList();
 	}
 
@@ -660,7 +679,6 @@ public class InterpreterPanel extends JPanel implements OptionsChangeListener {
 //==================================================================================================
 // Inner Classes
 //==================================================================================================
-
 
 	/**
 	 * An {@link InputStream} that has as its source text strings being pushed into

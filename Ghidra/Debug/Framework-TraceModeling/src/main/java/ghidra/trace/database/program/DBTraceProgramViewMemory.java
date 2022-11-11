@@ -68,7 +68,13 @@ public class DBTraceProgramViewMemory extends AbstractDBTraceProgramViewMemory {
 	}
 
 	@Override
-	protected void recomputeAddressSet() {
+	void setSnap(long snap) {
+		super.setSnap(snap);
+		updateBytesChanged(null);
+	}
+
+	@Override
+	protected synchronized void recomputeAddressSet() {
 		AddressSet temp = new AddressSet();
 		// TODO: Performance test this
 		forVisibleRegions(reg -> temp.add(reg.getRange()));
@@ -133,7 +139,6 @@ public class DBTraceProgramViewMemory extends AbstractDBTraceProgramViewMemory {
 
 	public void updateChangeRegionBlockRange(TraceMemoryRegion region, AddressRange oldRange,
 			AddressRange newRange) {
-		// TODO: update cached block? Nothing to update.
 		changeRange(oldRange, newRange);
 	}
 
@@ -154,5 +159,16 @@ public class DBTraceProgramViewMemory extends AbstractDBTraceProgramViewMemory {
 		regionBlocks.clear();
 		spaceBlocks.clear();
 		recomputeAddressSet();
+	}
+
+	public void updateBytesChanged(AddressRange range) {
+		if (regionBlocks == null) { // <init> order
+			return;
+		}
+		for (AbstractDBTraceProgramViewMemoryBlock block : forceFullView
+				? spaceBlocks.values()
+				: regionBlocks.values()) {
+			block.invalidateBytesCache(range);
+		}
 	}
 }

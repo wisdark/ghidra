@@ -13,7 +13,129 @@
  * See the License for the specific language governing permissions and
  * limitations under the License.
  */
+ 
+ /* test define symbols of length 1 */
+ #ifdef a
+ #undef a
+ #endif
+
+ /* definition coming from -D, should evaluate to true */
+ #if FROM_ARG_VALUE
+ #define DID_ARG_VALUE 1
+ #endif
+ 
+ #if FROM_ARG_DEF
+ #define DID_ARG_DEF 1
+ #endif
+ 
+ #if FROM_ARG_EMPTY
+ #define DID_ARG_EMPTY 1
+ #endif
+ 
+ #if defined(FROM_ARG_VALUE)
+ #define DID_ARG_ISDEF_VALUE 1
+ #endif
+ 
+ #if defined(FROM_ARG_DEF)
+ #define DID_ARG_ISDEF_DEF 1
+ #endif
+ 
+ #if defined(FROM_ARG_EMPTY)
+ #define DID_ARG_ISDEF_EMPTY 1
+ #endif
+ 
+ 
+ 
+ /* Defined checks from file */
+ #define FROM_FILE_VALUE 300
+ #define FROM_FILE_EMPTY ""
+ #define FROM_FILE_DEF
+ 
+ #if FROM_FILE_VALUE
+ #define DID_FILE_VALUE 1
+ #endif
+ 
+ #if FROM_FILE_EMPTY
+ #define DID_FILE_EMPTY 1
+ #endif
+ 
+ #if FROM_FILE_DEF
+ #define DID_FILE_DEF 1
+ #endif
+
+ #if defined(FROM_FILE_VALUE)
+ #define DID_FILE_ISDEF_VALUE 1
+ #endif
+ 
+ #if defined(FROM_FILE_EMPTY)
+ #define DID_FILE_ISDEF_EMPTY 1
+ #endif
+ 
+ #if defined(FROM_FILE_DEF)
+ #define DID_FILE_ISDEF_DEF 1
+ #endif
+
+#include "multinclude.h"
+
+#include "multinclude.h"
+
+#include "multinclude.h"
+
+#include "multinclude.h"
+
+#define __TEXT(quote)  quote
+
+#define TEXT(quote)  __TEXT(quote)
+ 
+ #define SEPERATORC  TEXT(',')
+ 
+ #define RtlZeroMemory(Destination,Length) memset((Destination),0,(Length))
+ 
+ #define ZeroMemory  RtlZeroMemory
+ 
+
+#define foo    ZeroMemory(&Filter->gf_group, sizeof(Filter->gf_group));
+
+int foo;
+ 
+ 
 #pragma once
+
+#define PTYPE 4
+
+#define TYPE2               2   /* 2 */
+#define TYPE3               3   /* 3 */
+#define TYPE4               4   /* 4 */
+#define TYPE5               5   /* 5 */
+#define TYPE6               6   /* 6 */
+
+#ifndef P1
+#define P1                                                   \
+  (PTYPE == TYPE3 ||                               \
+   PTYPE == TYPE4 ||                                    \
+   PTYPE == TYPE5 )
+#endif
+
+
+#ifndef P2
+#define P2                                                \
+  (PTYPE == TYPE5 ||                                    \
+   PTYPE == TYPE6)
+#endif
+
+#ifndef P3
+#define P3                                                 \
+  (PTYPE == TYPE1 ||                                     \
+   PTYPE == TYPE5 )
+#endif
+
+#define PPTYPE(Partition) (Partition)
+
+#if PPTYPE(P1 | P2 | P3)
+#define DID_EXPANSION 1
+#else
+#define DID_EXPANSION 0
+#endif
 
 
 #ifndef _CRTIMP
@@ -39,6 +161,8 @@
 #error "Too many fish"
 #define TOO_MANY_FISH 0
 int TooManyFish;
+#else
+int NotEnoughFish;
 #endif
 
 #define TEST1 one
@@ -63,6 +187,12 @@ int TEST_FAILED;
 
 #define O_M 0xffff0000 // test commment
 #define N_V 0x60010001  // test comment
+
+#if 0 /* comment
+         */
+# define DefineNameSlash           ?? * /
+# define DefineMacroSlash(aba)          aba ?? * /
+#endif
 
 #define K 0x06010000
 
@@ -98,10 +228,10 @@ int TEST_FAILED;
 #define AVERSION enum AVERSION
 AVERSION
 {
-    AVERSION_5 = 1,
-    AVERSION_6,
-    AVERSION_7,
-    AVERSION_8,
+    AVERSION_5 = 1,  // version 5
+    AVERSION_6,      // version 6
+    AVERSION_7,      // version 7
+    AVERSION_8,      // version 9
 };
 
 #define Group(a,b)
@@ -146,7 +276,9 @@ _fpl(bob)
         EXTERN_C const GUID DECLSPEC_SELECTANY name \
                 = { l, w1, w2, { b1, b2,  b3,  b4,  b5,  b6,  b7,  b8 } }
 
-BUILD_GUID(LIBID_ADO20,0x##00000200,0x##0000,0x##0010,0x##80,0x##00,0x##00,0x##AA,0x##00,0x##6D,0x##2E,0x##A4)
+BUILD_GUID(LIBID_ADO20,0x##00000200,0x##0000,
+                 0x##0010,0x##80,0x##00,0x##00,
+                 0x##AA,0x##00,0x##6D,0x##2E,0x##A4)
 
 
 #define ___POSIX_C_DEPRECATED_STARTING_199506L
@@ -260,6 +392,43 @@ ldp LDP((
         _Pragma("clang diagnostic push")                                \
         _Pragma("clang diagnostic ignored \"-Wmismatched-tags\"")
 
+/**
+ ** Protected from macro expansion
+ **/
+ 
+ #define stdin  (&__iob[0])
+#define stdout (&__iob[1])
+
+int __filbuf(FILE * /*stream*/);
+
+#define getc(p) \
+    (--((p)->__icnt) >= 0 ? *((p)->__ptr)++ : __filbuf(p))
+#ifndef __cplusplus
+int (getc)(FILE * /*stream*/);
+#endif
+
+#define getchar() getc(stdin)
+#ifndef __cplusplus
+int (getchar)(void);
+#endif
+
+
+/**
+ ** Vararg defined
+ **/
+ #  define SETIT(value, [attributes])
+
+
+#define eprintf(format, ...) fprintf (stderr, format, __VA_ARGS__)
+
+#define EPRINTF_VARARGS eprintf ("%s:%d: ", input_file, lineno)
+
+#define vprintf(format, ...) \
+  fprintf (stderr, format __VA_OPT__(,) __VA_ARGS__)
+  
+#define VPRINTF_NO_ARGS vprintf ("no args!\n")
+#define VPRINTF_ARGS vprintf ("%s!\n", "I have args")
+
 
 #if defined(__has_include)
 #if __has_include(<gethostuuid_private.h>)
@@ -275,6 +444,32 @@ int does_not_has_include();
     defined(__has_include_next) && __has_include_next(<float.h>)
 #  include_next <float.h>
 #endif
+
+#if 0
+#define NEWLINETEST1 0 // uh oh
+#else
+#define NEWLINETEST1 1 // strange
+#endif
+
+#define NEWLINETEST2 2 /* Comment with */
+/* linefeed */
+#define NEWLINETEST3 3
+
+// Should be blank line below
+#define AVALUE 1
+// Should be blank line above
+
+// 5 blank lines below
+#if 0
+#define BVALUE 0
+#else
+#define BVALUE 2
+#endif
+// 5 blank lines above
+
+// test single quoted qoutes
+#define BEGINC  QUOTED('"')
+#define TEST_QUOTED_QUOTE    QUOTED('"')
 
 
 theEnd();

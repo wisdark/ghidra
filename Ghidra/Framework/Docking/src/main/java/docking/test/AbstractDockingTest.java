@@ -38,8 +38,7 @@ import org.apache.commons.lang3.StringUtils;
 import org.junit.*;
 
 import docking.*;
-import docking.action.DockingActionIf;
-import docking.action.ToggleDockingActionIf;
+import docking.action.*;
 import docking.actions.DockingToolActions;
 import docking.dnd.GClipboard;
 import docking.framework.DockingApplicationConfiguration;
@@ -77,8 +76,6 @@ public abstract class AbstractDockingTest extends AbstractGenericTest {
 		new TestFailingErrorDisplayWrapper();
 
 	public AbstractDockingTest() {
-		super();
-
 		installNonNativeSystemClipboard();
 	}
 
@@ -105,19 +102,14 @@ public abstract class AbstractDockingTest extends AbstractGenericTest {
 		// timing issues.
 
 		// Note: this doesn't quite work as intended.  This should be run before each other
-		//       tearDown() method, but junit offers no way to do that.   If you can figure 
+		//       tearDown() method, but junit offers no way to do that.   If you can figure
 		//       out how to make that work, then update this code.
 		ConcurrentTestExceptionHandler.disable();
 	}
 
 	@Override
-	protected ApplicationLayout createApplicationLayout() {
-		try {
-			return new GhidraTestApplicationLayout(new File(getTestDirectoryPath()));
-		}
-		catch (IOException e) {
-			throw new AssertException(e);
-		}
+	protected ApplicationLayout createApplicationLayout() throws IOException {
+		return new GhidraTestApplicationLayout(new File(getTestDirectoryPath()));
 	}
 
 	@Override
@@ -322,7 +314,7 @@ public abstract class AbstractDockingTest extends AbstractGenericTest {
 	}
 
 	/**
-	 * Check for and display message component text associated with OptionDialog windows 
+	 * Check for and display message component text associated with OptionDialog windows
 	 * @param w any window
 	 * @return the message string if one can be found; <code>null</code> otherwise
 	 */
@@ -446,7 +438,7 @@ public abstract class AbstractDockingTest extends AbstractGenericTest {
 	/**
 	 * A convenience method to close all of the windows and frames that the current Java
 	 * windowing environment knows about
-	 * 
+	 *
 	 * @deprecated instead call the new {@link #closeAllWindows()}
 	 */
 	@Deprecated
@@ -728,11 +720,7 @@ public abstract class AbstractDockingTest extends AbstractGenericTest {
 		}
 
 		T t = windowManager.getComponentProvider(clazz);
-		if (t != null) {
-			return t;
-		}
-
-		return null;
+		return t;
 	}
 
 	/**
@@ -756,7 +744,7 @@ public abstract class AbstractDockingTest extends AbstractGenericTest {
 
 	/**
 	 * Allows you to find a component provider <b>with the given title</b>.  Most plugins will
-	 * only ever have a single provider.   In those cases, use 
+	 * only ever have a single provider.   In those cases, use
 	 * {@link #waitForComponentProvider(Class)}.  This version of that method is to allow you to
 	 * differentiate between multiple instances of a given provider that have different titles.
 	 *
@@ -1121,7 +1109,7 @@ public abstract class AbstractDockingTest extends AbstractGenericTest {
 	}
 
 	/**
-	 * A helper method to find all actions by name, with the given owner's name (this will not 
+	 * A helper method to find all actions by name, with the given owner's name (this will not
 	 * include reserved system actions)
 	 *
 	 * @param tool the tool containing all system actions
@@ -1164,14 +1152,14 @@ public abstract class AbstractDockingTest extends AbstractGenericTest {
 	}
 
 	/**
-	 * Finds the action by the given owner name and action name.  
-	 * If you do not know the owner name, then use  
+	 * Finds the action by the given owner name and action name.
+	 * If you do not know the owner name, then use
 	 * the call {@link #getActionsByName(Tool, String)} instead  (this will not include
 	 * reserved system actions).
-	 * 
-	 * <P>Note: more specific test case subclasses provide other methods for finding actions 
+	 *
+	 * <P>Note: more specific test case subclasses provide other methods for finding actions
 	 * when you have an owner name (which is usually the plugin name).
-	 * 
+	 *
 	 * @param tool the tool containing all system actions
 	 * @param owner the owner of the action
 	 * @param name the name to match
@@ -1194,7 +1182,7 @@ public abstract class AbstractDockingTest extends AbstractGenericTest {
 
 	/**
 	 * Returns the action by the given name that belongs to the given provider
-	 * 
+	 *
 	 * @param provider the provider
 	 * @param actionName the action name
 	 * @return the action
@@ -1486,7 +1474,7 @@ public abstract class AbstractDockingTest extends AbstractGenericTest {
 
 	/**
 	 * Simulates a user initiated keystroke using the keybinding of the given action
-	 * 
+	 *
 	 * @param destination the component for the action being executed
 	 * @param action The action to simulate pressing
 	 */
@@ -1522,8 +1510,8 @@ public abstract class AbstractDockingTest extends AbstractGenericTest {
 		triggerText(c, "\010");
 	}
 
-	/** 
-	 * Simulates the user pressing the 'Enter' key on the given text field 
+	/**
+	 * Simulates the user pressing the 'Enter' key on the given text field
 	 * @param c the component
 	 */
 	public static void triggerEnter(Component c) {
@@ -1715,10 +1703,10 @@ public abstract class AbstractDockingTest extends AbstractGenericTest {
 	}
 
 	/**
-	 * Fires a {@link KeyListener#keyPressed(KeyEvent)}, 
+	 * Fires a {@link KeyListener#keyPressed(KeyEvent)},
 	 * {@link KeyListener#keyTyped(KeyEvent)}
 	 * and {@link KeyListener#keyReleased(KeyEvent)} for the given key stroke
-	 * 
+	 *
 	 * @param c the destination component
 	 * @param ks the key stroke
 	 */
@@ -2020,7 +2008,7 @@ public abstract class AbstractDockingTest extends AbstractGenericTest {
 
 	private static <T> void doWaitForTableModel(ThreadedTableModel<T, ?> model) {
 
-		// Always wait for Swing at least once.  There seems to be a race condition for 
+		// Always wait for Swing at least once.  There seems to be a race condition for
 		// incremental threaded models where the table is not busy at the time this method
 		// is called, but there is an update pending via an invokeLater().
 		waitForSwing();
@@ -2140,6 +2128,10 @@ public abstract class AbstractDockingTest extends AbstractGenericTest {
 
 	public static boolean isEnabled(DockingActionIf action) {
 		return runSwing(() -> action.isEnabledForContext(new ActionContext()));
+	}
+
+	public static boolean isEnabled(DockingActionIf action, ActionContextProvider contextProvider) {
+		return runSwing(() -> action.isEnabledForContext(contextProvider.getActionContext(null)));
 	}
 
 	public static boolean isEnabled(AbstractButton button) {

@@ -19,18 +19,17 @@ import java.io.IOException;
 import java.lang.reflect.Field;
 import java.nio.ByteBuffer;
 import java.nio.charset.Charset;
+import java.util.Objects;
 import java.util.stream.Stream;
 
 import org.apache.commons.lang3.ArrayUtils;
 
-import com.google.common.collect.Range;
-
 import db.*;
-import ghidra.dbg.util.PathPredicates;
-import ghidra.trace.database.DBTraceUtils;
+import ghidra.trace.database.target.visitors.TreeTraversal;
+import ghidra.trace.database.target.visitors.TreeTraversal.Visitor;
+import ghidra.trace.model.Lifespan;
 import ghidra.trace.model.Trace;
-import ghidra.trace.model.target.TraceObject;
-import ghidra.trace.model.target.TraceObjectValPath;
+import ghidra.trace.model.target.*;
 import ghidra.util.LockHold;
 import ghidra.util.database.*;
 import ghidra.util.database.DBCachedObjectStoreFactory.AbstractDBFieldCodec;
@@ -48,7 +47,7 @@ public class DBTraceObjectValue extends DBAnnotatedObject implements InternalTra
 
 		protected PrimaryTriple(DBTraceObject parent, String key, long minSnap) {
 			this.parent = parent;
-			this.key = key;
+			this.key = Objects.requireNonNull(key);
 			this.minSnap = minSnap;
 		}
 
@@ -75,19 +74,15 @@ public class DBTraceObjectValue extends DBAnnotatedObject implements InternalTra
 			if (value == null) {
 				return null;
 			}
-			if (value.key == null) {
-				ByteBuffer buf = ByteBuffer.allocate(Long.BYTES * 2);
-				buf.putLong(DBTraceObjectDBFieldCodec.encode(value.parent) ^ Long.MIN_VALUE);
-				buf.putLong(value.minSnap ^ Long.MIN_VALUE);
-				return buf.array();
-			}
 
 			byte[] keyBytes = value.key.getBytes(cs);
 			ByteBuffer buf = ByteBuffer.allocate(keyBytes.length + 1 + Long.BYTES * 2);
 
 			buf.putLong(DBTraceObjectDBFieldCodec.encode(value.parent) ^ Long.MIN_VALUE);
+
 			buf.put(keyBytes);
 			buf.put((byte) 0);
+
 			buf.putLong(value.minSnap ^ Long.MIN_VALUE);
 
 			return buf.array();
@@ -101,16 +96,12 @@ public class DBTraceObjectValue extends DBAnnotatedObject implements InternalTra
 
 			DBTraceObject parent =
 				DBTraceObjectDBFieldCodec.decode(ent, buf.getLong() ^ Long.MIN_VALUE);
-			String key;
-			if (enc.length > Long.BYTES * 2) {
-				int nullPos = ArrayUtils.indexOf(enc, (byte) 0, buf.position());
-				assert nullPos != -1;
-				key = new String(enc, buf.position(), nullPos - buf.position(), cs);
-				buf.position(nullPos + 1);
-			}
-			else {
-				key = null;
-			}
+
+			int nullPos = ArrayUtils.indexOf(enc, (byte) 0, buf.position());
+			assert nullPos != -1;
+			String key = new String(enc, buf.position(), nullPos - buf.position(), cs);
+			buf.position(nullPos + 1);
+
 			long minSnap = buf.getLong() ^ Long.MIN_VALUE;
 
 			return new PrimaryTriple(parent, key, minSnap);
@@ -186,19 +177,22 @@ public class DBTraceObjectValue extends DBAnnotatedObject implements InternalTra
 		indexed = true,
 		codec = PrimaryTripleDBFieldCodec.class)
 	private PrimaryTriple triple;
-	@DBAnnotatedField(column = MAX_SNAP_COLUMN_NAME)
+	@DBAnnotatedField(
+		column = MAX_SNAP_COLUMN_NAME)
 	private long maxSnap;
 	@DBAnnotatedField(
 		column = CHILD_COLUMN_NAME,
 		indexed = true,
 		codec = DBTraceObjectDBFieldCodec.class)
 	private DBTraceObject child;
-	@DBAnnotatedField(column = PRIMITIVE_COLUMN_NAME, codec = VariantDBFieldCodec.class)
+	@DBAnnotatedField(
+		column = PRIMITIVE_COLUMN_NAME,
+		codec = VariantDBFieldCodec.class)
 	private Object primitive;
 
 	protected final DBTraceObjectManager manager;
 
-	private Range<Long> lifespan;
+	private Lifespan lifespan;
 
 	public DBTraceObjectValue(DBTraceObjectManager manager, DBCachedObjectStore<?> store,
 			DBRecord record) {
@@ -211,13 +205,13 @@ public class DBTraceObjectValue extends DBAnnotatedObject implements InternalTra
 		if (created) {
 			return;
 		}
-		lifespan = DBTraceUtils.toRange(triple.minSnap, maxSnap);
+		lifespan = Lifespan.span(triple.minSnap, maxSnap);
 	}
 
-	protected void set(Range<Long> lifespan, DBTraceObject parent, String key, Object value) {
-		this.triple = new PrimaryTriple(parent, key, DBTraceUtils.lowerEndpoint(lifespan));
-		this.maxSnap = DBTraceUtils.upperEndpoint(lifespan);
-		this.lifespan = DBTraceUtils.toRange(triple.minSnap, maxSnap);
+	protected void set(Lifespan lifespan, DBTraceObject parent, String key, Object value) {
+		this.triple = new PrimaryTriple(parent, key, lifespan.lmin());
+		this.maxSnap = lifespan.lmax();
+		this.lifespan = Lifespan.span(triple.minSnap, maxSnap);
 		if (value instanceof TraceObject) {
 			DBTraceObject child = manager.assertIsMine((TraceObject) value);
 			this.child = child;
@@ -237,15 +231,15 @@ public class DBTraceObjectValue extends DBAnnotatedObject implements InternalTra
 	}
 
 	@Override
-	public void doSetLifespan(Range<Long> lifespan) {
-		long minSnap = DBTraceUtils.lowerEndpoint(lifespan);
+	public void doSetLifespan(Lifespan lifespan) {
+		long minSnap = lifespan.lmin();
 		if (this.triple.minSnap != minSnap) {
 			this.triple = triple.withMinSnap(minSnap);
 			update(TRIPLE_COLUMN);
 		}
-		this.maxSnap = DBTraceUtils.upperEndpoint(lifespan);
+		this.maxSnap = lifespan.lmax();
 		update(MAX_SNAP_COLUMN);
-		this.lifespan = DBTraceUtils.toRange(minSnap, maxSnap);
+		this.lifespan = Lifespan.span(minSnap, maxSnap);
 	}
 
 	@Override
@@ -260,12 +254,12 @@ public class DBTraceObjectValue extends DBAnnotatedObject implements InternalTra
 
 	@Override
 	public DBTraceObject getParent() {
-		return triple.parent;
+		return triple == null ? null : triple.parent;
 	}
 
 	@Override
 	public String getEntryKey() {
-		return triple.key;
+		return triple == null ? null : triple.key;
 	}
 
 	@Override
@@ -281,7 +275,17 @@ public class DBTraceObjectValue extends DBAnnotatedObject implements InternalTra
 	}
 
 	@Override
-	public Range<Long> getLifespan() {
+	public boolean isObject() {
+		return child != null;
+	}
+
+	@Override
+	public DBTraceObject getChildOrNull() {
+		return child;
+	}
+
+	@Override
+	public Lifespan getLifespan() {
 		try (LockHold hold = manager.trace.lockRead()) {
 			return lifespan;
 		}
@@ -290,7 +294,7 @@ public class DBTraceObjectValue extends DBAnnotatedObject implements InternalTra
 	@Override
 	public void setMinSnap(long minSnap) {
 		try (LockHold hold = manager.trace.lockWrite()) {
-			setLifespan(DBTraceUtils.toRange(minSnap, maxSnap));
+			setLifespan(Lifespan.span(minSnap, maxSnap));
 		}
 	}
 
@@ -304,7 +308,7 @@ public class DBTraceObjectValue extends DBAnnotatedObject implements InternalTra
 	@Override
 	public void setMaxSnap(long maxSnap) {
 		try (LockHold hold = manager.trace.lockWrite()) {
-			setLifespan(DBTraceUtils.toRange(triple.minSnap, maxSnap));
+			setLifespan(Lifespan.span(triple.minSnap, maxSnap));
 		}
 	}
 
@@ -315,46 +319,16 @@ public class DBTraceObjectValue extends DBAnnotatedObject implements InternalTra
 		}
 	}
 
-	protected Stream<TraceObjectValPath> doGetAllPaths(Range<Long> span,
-			DBTraceObjectValPath post) {
-		return triple.parent.doGetAllPaths(span, post.prepend(this));
+	protected Stream<? extends TraceObjectValPath> doStreamVisitor(Lifespan span,
+			Visitor visitor) {
+		return TreeTraversal.INSTANCE.walkValue(visitor, this, span, null);
 	}
 
-	protected Stream<? extends DBTraceObjectValPath> doGetAncestors(Range<Long> span,
-			DBTraceObjectValPath post, PathPredicates predicates) {
-		return triple.parent.doGetAncestors(span, post.prepend(this), predicates);
-	}
-
-	@Override
-	public Stream<? extends DBTraceObjectValPath> doGetSuccessors(
-			Range<Long> span, DBTraceObjectValPath pre, PathPredicates predicates) {
-		DBTraceObjectValPath path = pre == null ? DBTraceObjectValPath.of() : pre.append(this);
-		boolean includeMe = predicates.matches(path.getKeyList());
-		boolean descend = child != null;
-		if (includeMe && descend) {
-			return Stream.concat(Stream.of(path), child.doGetSuccessors(span, path, predicates));
+	protected TraceObjectKeyPath doGetCanonicalPath() {
+		if (triple == null || triple.parent == null) {
+			return TraceObjectKeyPath.of();
 		}
-		if (includeMe) {
-			return Stream.of(path);
-		}
-		if (descend) {
-			return child.doGetSuccessors(span, path, predicates);
-		}
-		return Stream.empty();
-	}
-
-	@Override
-	public Stream<? extends DBTraceObjectValPath> doGetOrderedSuccessors(Range<Long> span,
-			DBTraceObjectValPath pre, PathPredicates predicates, boolean forward) {
-		DBTraceObjectValPath path = pre == null ? DBTraceObjectValPath.of() : pre.append(this);
-		if (predicates.matches(path.getKeyList())) {
-			// Singleton path, so if I match, nothing below can
-			return Stream.of(path);
-		}
-		if (child == null) {
-			return Stream.of();
-		}
-		return child.doGetOrderedSuccessors(span, path, predicates, forward);
+		return triple.parent.getCanonicalPath().extend(triple.key);
 	}
 
 	protected boolean doIsCanonical() {
@@ -364,7 +338,14 @@ public class DBTraceObjectValue extends DBAnnotatedObject implements InternalTra
 		if (triple.parent == null) {
 			return true;
 		}
-		return triple.parent.getCanonicalPath().extend(triple.key).equals(child.getCanonicalPath());
+		return doGetCanonicalPath().equals(child.getCanonicalPath());
+	}
+
+	@Override
+	public TraceObjectKeyPath getCanonicalPath() {
+		try (LockHold hold = LockHold.lock(manager.lock.readLock())) {
+			return doGetCanonicalPath();
+		}
 	}
 
 	@Override
@@ -372,13 +353,6 @@ public class DBTraceObjectValue extends DBAnnotatedObject implements InternalTra
 		try (LockHold hold = LockHold.lock(manager.lock.readLock())) {
 			return doIsCanonical();
 		}
-	}
-
-	protected void doDeleteSuccessors() {
-		if (!doIsCanonical()) {
-			return;
-		}
-		child.doDeleteTree();
 	}
 
 	@Override
@@ -392,29 +366,17 @@ public class DBTraceObjectValue extends DBAnnotatedObject implements InternalTra
 			if (triple.parent == null) {
 				throw new IllegalArgumentException("Cannot delete root value");
 			}
-			doDelete();
-		}
-	}
-
-	protected void doDeleteTree() {
-		doDeleteSuccessors();
-		doDelete();
-	}
-
-	@Override
-	public void deleteTree() {
-		try (LockHold hold = LockHold.lock(manager.lock.writeLock())) {
-			doDeleteTree();
+			doDeleteAndEmit();
 		}
 	}
 
 	@Override
-	public InternalTraceObjectValue truncateOrDelete(Range<Long> span) {
+	public InternalTraceObjectValue truncateOrDelete(Lifespan span) {
 		try (LockHold hold = LockHold.lock(manager.lock.writeLock())) {
 			if (triple.parent == null) {
 				throw new IllegalArgumentException("Cannot truncate or delete root value");
 			}
-			return doTruncateOrDelete(span);
+			return doTruncateOrDeleteAndEmitLifeChange(span);
 		}
 	}
 }
