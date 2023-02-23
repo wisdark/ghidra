@@ -101,7 +101,8 @@ public class DebuggerStaticMappingProvider extends ComponentProviderAdapter
 
 		public MappingTableModel(PluginTool tool) {
 			super(tool, "Mappings", StaticMappingTableColumns.class,
-				TraceStaticMapping::getObjectKey, StaticMappingRow::new);
+				TraceStaticMapping::getObjectKey, StaticMappingRow::new,
+				StaticMappingRow::getMapping);
 		}
 	}
 
@@ -173,6 +174,10 @@ public class DebuggerStaticMappingProvider extends ComponentProviderAdapter
 		buildMainPanel();
 		setVisible(true);
 		createActions();
+	}
+
+	void dispose() {
+		addMappingDialog.dispose();
 	}
 
 	@AutoServiceConsumed
@@ -286,11 +291,11 @@ public class DebuggerStaticMappingProvider extends ComponentProviderAdapter
 				: traceLen == 0 ? progLen : MathUtilities.unsignedMin(progLen, traceLen);
 		Address progStart = progLen != 0 ? progSel.getMinAddress() : progLoc.getAddress();
 		Address traceStart = traceLen != 0 ? traceSel.getMinAddress() : traceLoc.getAddress();
-		TraceProgramView view = (TraceProgramView) traceLoc.getProgram();
+		long snap = traceManager.getCurrentSnap();
 
 		try {
 			addMappingDialog.setValues(progLoc.getProgram(), currentTrace, progStart, traceStart,
-				length, Lifespan.nowOn(view.getSnap()));
+				length, Lifespan.nowOn(snap));
 		}
 		catch (AddressOverflowException e) {
 			Msg.showError(this, null, "Add Mapping", "Error populating dialog");

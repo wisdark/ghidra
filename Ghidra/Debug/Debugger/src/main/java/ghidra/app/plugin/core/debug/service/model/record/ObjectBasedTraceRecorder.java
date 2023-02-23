@@ -29,6 +29,7 @@ import ghidra.app.services.TraceRecorderListener;
 import ghidra.async.AsyncFence;
 import ghidra.async.AsyncUtils;
 import ghidra.dbg.AnnotatedDebuggerAttributeListener;
+import ghidra.dbg.DebuggerObjectModel;
 import ghidra.dbg.error.DebuggerMemoryAccessException;
 import ghidra.dbg.error.DebuggerModelAccessException;
 import ghidra.dbg.target.*;
@@ -425,8 +426,9 @@ public class ObjectBasedTraceRecorder implements TraceRecorder {
 	}
 
 	@Override
-	public TargetRegisterBank getTargetRegisterBank(TraceThread thread, int frameLevel) {
-		return objectRecorder.getTargetFrameInterface(thread, frameLevel, TargetRegisterBank.class);
+	public Set<TargetRegisterBank> getTargetRegisterBanks(TraceThread thread, int frameLevel) {
+		return Set.of(
+			objectRecorder.getTargetFrameInterface(thread, frameLevel, TargetRegisterBank.class));
 	}
 
 	@Override
@@ -468,7 +470,7 @@ public class ObjectBasedTraceRecorder implements TraceRecorder {
 	public Set<TargetThread> getLiveTargetThreads() {
 		return trace.getObjectManager()
 				.getRootObject()
-				.querySuccessorsInterface(Lifespan.at(getSnap()), TraceObjectThread.class)
+				.querySuccessorsInterface(Lifespan.at(getSnap()), TraceObjectThread.class, true)
 				.map(t -> objectRecorder.getTargetInterface(t.getObject(), TargetThread.class))
 				.collect(Collectors.toSet());
 	}
@@ -503,7 +505,7 @@ public class ObjectBasedTraceRecorder implements TraceRecorder {
 	protected TargetRegisterContainer getTargetRegisterContainer(TraceThread thread,
 			int frameLevel) {
 		if (!(thread instanceof TraceObjectThread tot)) {
-			throw new AssertionError();
+			throw new AssertionError("thread = " + thread);
 		}
 		TraceObject objThread = tot.getObject();
 		TraceObject regContainer = objThread.queryRegisterContainer(frameLevel);
@@ -539,6 +541,52 @@ public class ObjectBasedTraceRecorder implements TraceRecorder {
 
 	protected static byte[] encodeValue(int byteLength, BigInteger value) {
 		return Utils.bigIntegerToBytes(value, byteLength, true);
+	}
+
+	protected TargetRegisterBank isExactRegisterOnTarget(TracePlatform platform,
+			TargetRegisterContainer regContainer, Register register) {
+		PathMatcher matcher =
+			platform.getConventionalRegisterPath(regContainer.getSchema(), List.of(), register);
+		for (TargetObject targetObject : matcher.getCachedSuccessors(regContainer).values()) {
+			if (!(targetObject instanceof TargetRegister targetRegister)) {
+				continue;
+			}
+			DebuggerObjectModel model = targetRegister.getModel();
+			List<String> pathBank = model.getRootSchema()
+					.searchForAncestor(TargetRegisterBank.class, targetRegister.getPath());
+			if (pathBank == null ||
+				!(model.getModelObject(pathBank) instanceof TargetRegisterBank targetBank)) {
+				continue;
+			}
+			return targetBank;
+		}
+		return null;
+	}
+
+	protected TargetRegisterBank isExactRegisterOnTarget(TracePlatform platform, TraceThread thread,
+			int frameLevel, Register register) {
+		TargetRegisterContainer regContainer = getTargetRegisterContainer(thread, frameLevel);
+		if (regContainer == null) {
+			return null;
+		}
+		return isExactRegisterOnTarget(platform, regContainer, register);
+	}
+
+	@Override
+	public Register isRegisterOnTarget(TracePlatform platform, TraceThread thread, int frameLevel,
+			Register register) {
+		for (; register != null; register = register.getParentRegister()) {
+			TargetRegisterBank targetBank =
+				isExactRegisterOnTarget(platform, thread, frameLevel, register);
+			if (targetBank != null) {
+				/**
+				 * TODO: A way to ask the target which registers are modifiable, but
+				 * "isRegisterOnTarget" does not necessarily imply for writing
+				 */
+				return register;
+			}
+		}
+		return null;
 	}
 
 	@Override
@@ -625,9 +673,10 @@ public class ObjectBasedTraceRecorder implements TraceRecorder {
 	public List<TargetBreakpointSpecContainer> collectBreakpointContainers(TargetThread thread) {
 		if (thread == null) {
 			return objectRecorder.collectTargetSuccessors(target,
-				TargetBreakpointSpecContainer.class);
+				TargetBreakpointSpecContainer.class, false);
 		}
-		return objectRecorder.collectTargetSuccessors(thread, TargetBreakpointSpecContainer.class);
+		return objectRecorder.collectTargetSuccessors(thread, TargetBreakpointSpecContainer.class,
+			false);
 	}
 
 	private class BreakpointConvention {
@@ -663,7 +712,8 @@ public class ObjectBasedTraceRecorder implements TraceRecorder {
 	@Override
 	public List<TargetBreakpointLocation> collectBreakpoints(TargetThread thread) {
 		if (thread == null) {
-			return objectRecorder.collectTargetSuccessors(target, TargetBreakpointLocation.class);
+			return objectRecorder.collectTargetSuccessors(target, TargetBreakpointLocation.class,
+				true);
 		}
 		BreakpointConvention convention = new BreakpointConvention(
 			objectRecorder.getTraceInterface(thread, TraceObjectThread.class));
@@ -677,7 +727,8 @@ public class ObjectBasedTraceRecorder implements TraceRecorder {
 
 	@Override
 	public Set<TraceBreakpointKind> getSupportedBreakpointKinds() {
-		return objectRecorder.collectTargetSuccessors(target, TargetBreakpointSpecContainer.class)
+		return objectRecorder
+				.collectTargetSuccessors(target, TargetBreakpointSpecContainer.class, false)
 				.stream()
 				.flatMap(c -> c.getSupportedBreakpointKinds().stream())
 				.map(k -> TraceRecorder.targetToTraceBreakpointKind(k))
@@ -690,6 +741,11 @@ public class ObjectBasedTraceRecorder implements TraceRecorder {
 	}
 
 	@Override
+	public boolean isSupportsActivation() {
+		return objectRecorder.isSupportsActivation;
+	}
+
+	@Override
 	public TargetObject getFocus() {
 		return curFocus;
 	}
@@ -697,7 +753,7 @@ public class ObjectBasedTraceRecorder implements TraceRecorder {
 	@Override
 	public CompletableFuture<Boolean> requestFocus(TargetObject focus) {
 		for (TargetFocusScope scope : objectRecorder.collectTargetSuccessors(target,
-			TargetFocusScope.class)) {
+			TargetFocusScope.class, false)) {
 			if (PathUtils.isAncestor(scope.getPath(), focus.getPath())) {
 				return scope.requestFocus(focus).thenApply(__ -> true).exceptionally(ex -> {
 					ex = AsyncUtils.unwrapThrowable(ex);
@@ -713,6 +769,28 @@ public class ObjectBasedTraceRecorder implements TraceRecorder {
 			}
 		}
 		Msg.info(this, "Could not find suitable focus scope for " + focus);
+		return CompletableFuture.completedFuture(false);
+	}
+
+	@Override
+	public CompletableFuture<Boolean> requestActivation(TargetObject active) {
+		for (TargetActiveScope scope : objectRecorder.collectTargetSuccessors(target,
+			TargetActiveScope.class, false)) {
+			if (PathUtils.isAncestor(scope.getPath(), active.getPath())) {
+				return scope.requestActivation(active).thenApply(__ -> true).exceptionally(ex -> {
+					ex = AsyncUtils.unwrapThrowable(ex);
+					String msg = "Could not activate " + active + ": " + ex.getMessage();
+					if (ex instanceof DebuggerModelAccessException) {
+						Msg.info(this, msg);
+					}
+					else {
+						Msg.error(this, msg, ex);
+					}
+					return false;
+				});
+			}
+		}
+		Msg.info(this, "Could not find suitable active scope for " + active);
 		return CompletableFuture.completedFuture(false);
 	}
 

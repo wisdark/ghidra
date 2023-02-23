@@ -305,6 +305,12 @@ public:
   virtual void decode(Decoder &decoder);
 };
 
+/// \brief A Symbol that forces a particular \e union field at a particular point in the body of a function
+///
+/// This is an internal Symbol that users can create if they want to force a particular interpretation of a
+/// a \e union data-type.  It attaches to data-flow via the DynamicHash mechanism, which also allows it to attach
+/// to a specific read or write of the target Varnode.  Different reads (or write) of the same Varnode can have
+/// different symbols attached.  The Symbol's associated data-type will be the desired \e union to force.
 class UnionFacetSymbol : public Symbol {
   int4 fieldNum;			///< Particular field to associate with Symbol access
 public:
@@ -925,6 +931,7 @@ public:
   Scope *mapScope(Scope *qpoint,const Address &addr,const Address &usepoint);
   uint4 getProperty(const Address &addr) const { return flagbase.getValue(addr); }	///< Get boolean properties at the given address
   void setPropertyRange(uint4 flags,const Range &range);	///< Set boolean properties over a given memory range
+  void clearPropertyRange(uint4 flags,const Range &range);	///< Clear boolean properties over a given memory range
   void setProperties(const partmap<Address,uint4> &newflags) { flagbase = newflags; }	///< Replace the property map
   const partmap<Address,uint4> &getProperties(void) const { return flagbase; }	///< Get the entire property map
   void encode(Encoder &encoder) const;				///< Encode the whole Database to a stream

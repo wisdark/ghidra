@@ -47,6 +47,8 @@ import agent.dbgeng.model.iface2.DbgModelTargetObject;
 import agent.dbgeng.model.iface2.DbgModelTargetThread;
 import ghidra.async.*;
 import ghidra.comm.util.BitmaskSet;
+import ghidra.dbg.target.TargetLauncher.CmdLineParser;
+import ghidra.dbg.target.TargetLauncher.TargetCmdLineLauncher;
 import ghidra.dbg.target.TargetObject;
 import ghidra.dbg.util.HandlerMap;
 import ghidra.lifecycle.Internal;
@@ -142,14 +144,18 @@ public class DbgManagerImpl implements DbgManager {
 	public DbgThreadImpl getThreadComputeIfAbsent(DebugThreadId id, DbgProcessImpl process,
 			int tid, boolean fire) {
 		synchronized (threads) {
-			if (!threads.containsKey(id)) {
-				DbgThreadImpl thread = new DbgThreadImpl(this, process, id, tid);
-				thread.add();
-				if (fire) {
-					Causes cause = DbgCause.Causes.UNCLAIMED;
-					getEventListeners().fire.threadCreated(thread, cause);
-					getEventListeners().fire.threadSelected(thread, null, cause);
+			if (threads.containsKey(id)) {
+				DbgThreadImpl existingThread = threads.get(id);
+				if (existingThread.getTid() == tid) {
+					return existingThread;
 				}
+			}
+			DbgThreadImpl thread = new DbgThreadImpl(this, process, id, tid);
+			thread.add();
+			if (fire) {
+				Causes cause = DbgCause.Causes.UNCLAIMED;
+				getEventListeners().fire.threadCreated(thread, cause);
+				getEventListeners().fire.threadSelected(thread, null, cause);
 			}
 			return threads.get(id);
 		}
@@ -216,12 +222,16 @@ public class DbgManagerImpl implements DbgManager {
 
 	public DbgProcessImpl getProcessComputeIfAbsent(DebugProcessId id, int pid, boolean fire) {
 		synchronized (processes) {
-			if (!processes.containsKey(id)) {
-				DbgProcessImpl process = new DbgProcessImpl(this, id, pid);
-				process.add();
-				if (fire) {
-					getEventListeners().fire.processAdded(process, DbgCause.Causes.UNCLAIMED);
+			if (processes.containsKey(id)) {
+				DbgProcessImpl existingProc = processes.get(id);
+				if (existingProc.getPid() == pid) {
+					return existingProc;
 				}
+			}
+			DbgProcessImpl process = new DbgProcessImpl(this, id, pid);
+			process.add();
+			if (fire) {
+				getEventListeners().fire.processAdded(process, DbgCause.Causes.UNCLAIMED);
 			}
 			return processes.get(id);
 		}
@@ -728,7 +738,7 @@ public class DbgManagerImpl implements DbgManager {
 		int tid = so.getCurrentThreadSystemId();
 		DbgThreadImpl thread = getThreadComputeIfAbsent(eventId, process, tid, true);
 		getEventListeners().fire.eventSelected(evt, evt.getCause());
-		//getEventListeners().fire.threadCreated(thread, DbgCause.Causes.UNCLAIMED);
+		getEventListeners().fire.threadCreated(thread, DbgCause.Causes.UNCLAIMED);
 		getEventListeners().fire.threadSelected(thread, null, evt.getCause());
 
 		String key = Integer.toHexString(eventId.id);
@@ -1103,6 +1113,11 @@ public class DbgManagerImpl implements DbgManager {
 			long bptId = evt.getId();
 			if (bptId == DbgEngUtil.DEBUG_ANY_ID.longValue()) {
 				changeBreakpoints();
+				for (DbgBreakpointInfo bptInfo : breakpoints.values()) {
+					if (bptInfo.getProc().equals(currentProcess)) {
+						doBreakpointDeleted(bptInfo.getNumber(), evt.getCause());
+					}
+				}
 			}
 			else {
 				DebugBreakpoint bpt = getControl().getBreakpointById((int) bptId);
@@ -1110,17 +1125,27 @@ public class DbgManagerImpl implements DbgManager {
 					doBreakpointDeleted(bptId, evt.getCause());
 					return;
 				}
-				DbgBreakpointInfo knownBreakpoint = getKnownBreakpoint(bptId);
+				DbgBreakpointInfo knownBreakpoint = breakpoints.get(bptId);
 				if (knownBreakpoint == null) {
 					breakpointInfo = new DbgBreakpointInfo(bpt, getCurrentProcess());
 					if (breakpointInfo.getOffset() != null) {
-						doBreakpointCreated(breakpointInfo, evt.getCause());
+						addKnownBreakpoint(breakpointInfo, false);
+						// NB: we don't want to create this here as the address is 0s
+						//doBreakpointCreated(breakpointInfo, evt.getCause());
 					}
 					return;
 				}
 				breakpointInfo = knownBreakpoint;
+				Long initOffset = breakpointInfo.getOffset();
 				breakpointInfo.setBreakpoint(bpt);
-				doBreakpointModified(breakpointInfo, evt.getCause());
+				if (!breakpointInfo.getOffset().equals(0L)) {
+					if (initOffset.equals(0L)) {
+						doBreakpointCreated(breakpointInfo, evt.getCause());
+					}
+					else {
+						doBreakpointModified(breakpointInfo, evt.getCause());
+					}
+				}
 			}
 		}
 	}
@@ -1143,7 +1168,7 @@ public class DbgManagerImpl implements DbgManager {
 	 */
 	@Internal
 	public void doBreakpointCreated(DbgBreakpointInfo newInfo, DbgCause cause) {
-		addKnownBreakpoint(newInfo, false);
+		addKnownBreakpoint(newInfo, true);
 		getEventListeners().fire.breakpointCreated(newInfo, cause);
 	}
 
@@ -1172,6 +1197,7 @@ public class DbgManagerImpl implements DbgManager {
 			return;
 		}
 		getEventListeners().fire.breakpointDeleted(oldInfo, cause);
+		oldInfo.dispose();
 	}
 
 	protected void doBreakpointModifiedSameLocations(DbgBreakpointInfo newInfo,
@@ -1352,12 +1378,36 @@ public class DbgManagerImpl implements DbgManager {
 
 	@Override
 	public CompletableFuture<?> launch(List<String> args) {
-		return execute(new DbgLaunchProcessCommand(this, args));
+		BitmaskSet<DebugCreateFlags> cf = BitmaskSet.of(DebugCreateFlags.DEBUG_PROCESS);
+		BitmaskSet<DebugEngCreateFlags> ef =
+			BitmaskSet.of(DebugEngCreateFlags.DEBUG_ECREATE_PROCESS_DEFAULT);
+		BitmaskSet<DebugVerifierFlags> vf =
+			BitmaskSet.of(DebugVerifierFlags.DEBUG_VERIFIER_DEFAULT);
+		return execute(new DbgLaunchProcessCommand(this, args,
+			null, null, cf, ef, vf));
 	}
 
 	@Override
-	public CompletableFuture<Void> launch(Map<String, ?> args) {
-		return CompletableFuture.completedFuture(null);
+	public CompletableFuture<Void> launch(Map<String, ?> map) {
+		List<String> args =
+			CmdLineParser.tokenize(TargetCmdLineLauncher.PARAMETER_CMDLINE_ARGS.get(map));
+		String initDir = (String) map.get("dir");
+		String env = (String) map.get("env");
+
+		Integer cfVal = (Integer) map.get("cf");
+		Integer efVal = (Integer) map.get("ef");
+		Integer vfVal = (Integer) map.get("vf");
+		BitmaskSet<DebugCreateFlags> cf =
+			new BitmaskSet<DebugCreateFlags>(DebugCreateFlags.class,
+				cfVal == null ? 1 : cfVal);
+		BitmaskSet<DebugEngCreateFlags> ef =
+			new BitmaskSet<DebugEngCreateFlags>(DebugEngCreateFlags.class,
+				efVal == null ? 0 : efVal);
+		BitmaskSet<DebugVerifierFlags> vf =
+			new BitmaskSet<DebugVerifierFlags>(DebugVerifierFlags.class,
+				vfVal == null ? 0 : vfVal);
+		return execute(new DbgLaunchProcessCommand(this, args,
+			initDir, env, cf, ef, vf)).thenApply(__ -> null);
 	}
 
 	public CompletableFuture<?> openFile(Map<String, ?> args) {

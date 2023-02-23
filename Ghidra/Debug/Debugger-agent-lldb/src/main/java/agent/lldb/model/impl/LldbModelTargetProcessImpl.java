@@ -24,6 +24,7 @@ import agent.lldb.lldb.DebugClient;
 import agent.lldb.manager.LldbCause;
 import agent.lldb.manager.LldbReason;
 import agent.lldb.manager.cmd.*;
+import agent.lldb.manager.impl.LldbManagerImpl;
 import agent.lldb.model.iface1.LldbModelTargetFocusScope;
 import agent.lldb.model.iface2.*;
 import ghidra.async.AsyncUtils;
@@ -153,7 +154,7 @@ public class LldbModelTargetProcessImpl extends LldbModelTargetObjectImpl
 			threads.requestElements(true);
 			StopReason stopReason = getManager().getCurrentThread().GetStopReason();
 			if (!stopReason.equals(StopReason.eStopReasonPlanComplete)) {
-				memory.requestElements(true);			
+				memory.requestElements(true);
 			}
 		}
 	}
@@ -214,12 +215,14 @@ public class LldbModelTargetProcessImpl extends LldbModelTargetObjectImpl
 
 	@Override
 	public CompletableFuture<Void> step(TargetStepKind kind) {
-		return getManager().execute(new LldbStepCommand(getManager(), null, kind, null));
+		LldbManagerImpl manager = getManager();
+		return getManager().execute(new LldbStepCommand(manager, null, kind, null));
 	}
 
 	@Override
 	public CompletableFuture<Void> step(Map<String, ?> args) {
-		return getManager().execute(new LldbStepCommand(getManager(), null, null, args));
+		LldbManagerImpl manager = getManager();
+		return getManager().execute(new LldbStepCommand(manager, null, null, args));
 	}
 
 	@Override
@@ -245,7 +248,7 @@ public class LldbModelTargetProcessImpl extends LldbModelTargetObjectImpl
 				STATE_ATTRIBUTE_NAME, TargetExecutionState.TERMINATED, //
 				EXIT_CODE_ATTRIBUTE_NAME, exitDesc //
 			), "Exited");
-			getListeners().fire.event(getProxy(), null, TargetEventType.PROCESS_EXITED,
+			broadcast().event(getProxy(), null, TargetEventType.PROCESS_EXITED,
 				"Process " + DebugClient.getId(getProcess()) + " exited code=" + exitDesc,
 				List.of(getProxy()));
 		}

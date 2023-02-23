@@ -33,7 +33,7 @@ import org.apache.commons.lang3.StringUtils;
 import docking.action.DockingAction;
 import docking.widgets.table.*;
 import docking.widgets.table.DefaultEnumeratedColumnTableModel.EnumeratedTableColumn;
-import ghidra.GhidraOptions;
+import generic.theme.GColor;
 import ghidra.app.plugin.core.debug.DebuggerCoordinates;
 import ghidra.app.plugin.core.debug.DebuggerPluginPackage;
 import ghidra.app.plugin.core.debug.gui.DebuggerResources;
@@ -47,8 +47,6 @@ import ghidra.app.util.pcode.AbstractPcodeFormatter;
 import ghidra.async.SwingExecutorService;
 import ghidra.base.widgets.table.DataTypeTableCellEditor;
 import ghidra.docking.settings.Settings;
-import ghidra.framework.options.AutoOptions;
-import ghidra.framework.options.annotation.*;
 import ghidra.framework.plugintool.*;
 import ghidra.framework.plugintool.annotation.AutoServiceConsumed;
 import ghidra.pcode.emu.PcodeThread;
@@ -72,19 +70,36 @@ import ghidra.util.table.column.AbstractGColumnRenderer;
 public class DebuggerPcodeStepperProvider extends ComponentProviderAdapter {
 	private static final FontRenderContext METRIC_FRC =
 		new FontRenderContext(new AffineTransform(), false, false);
-	private static final String BACKGROUND_COLOR = "Background Color";
 
-	private static final String ADDRESS_COLOR = "Address Color";
-	private static final String REGISTERS_COLOR = "Registers Color";
-	private static final String CONSTANT_COLOR = "Constant Color";
-	private static final String LABELS_LOCAL_COLOR = "Labels, Local Color";
-	private static final String MNEMONIC_COLOR = "Mnemonic Color";
-	private static final String UNIMPL_COLOR = "Unimplemented Mnemonic Color";
-	private static final String SEPARATOR_COLOR = "Separator Color";
-	private static final String LINE_LABEL_COLOR = "P-code Line Label Color";
-	private static final String SPACE_COLOR = "P-code Address Space Color";
-	private static final String RAW_COLOR = "P-code Raw Varnode Color";
-	private static final String USEROP_COLOR = "P-code Userop Color";
+	private static final Color COLOR_BACKGROUND =
+		new GColor("color.bg.listing");
+	private static final Color COLOR_BACKGROUND_CURSOR =
+		new GColor("color.bg.currentline.listing");
+	private static final Color COLOR_BACKGROUND_COUNTER =
+		new GColor("color.debugger.plugin.resources.pcode.counter");
+
+	private static final Color COLOR_FOREGROUND_ADDRESS =
+		new GColor("color.fg.listing.address");
+	private static final Color COLOR_FOREGROUND_REGISTER =
+		new GColor("color.fg.listing.register");
+	private static final Color COLOR_FOREGROUND_SCALAR =
+		new GColor("color.fg.listing.constant");
+	private static final Color COLOR_FOREGROUND_LOCAL =
+		new GColor("color.fg.listing.label.local");
+	private static final Color COLOR_FOREGROUND_MNEMONIC =
+		new GColor("color.fg.listing.mnemonic");
+	private static final Color COLOR_FOREGROUND_UNIMPL =
+		new GColor("color.fg.listing.mnemonic.unimplemented");
+	private static final Color COLOR_FOREGROUND_SEPARATOR =
+		new GColor("color.fg.listing.separator");
+	private static final Color COLOR_FOREGROUND_LINE_LABEL =
+		new GColor("color.fg.listing.pcode.label");
+	private static final Color COLOR_FOREGROUND_SPACE =
+		new GColor("color.fg.listing.pcode.address.space");
+	private static final Color COLOR_FOREGROUND_RAW =
+		new GColor("color.fg.listing.pcode.varnode");
+	private static final Color COLOR_FOREGROUND_USEROP =
+		new GColor("color.fg.listing.pcode.userop");
 
 	private static final String SPAN_ADDRESS = "addr";
 	private static final String SPAN_REGISTER = "reg";
@@ -243,7 +258,8 @@ public class DebuggerPcodeStepperProvider extends ComponentProviderAdapter {
 			PcodeRow row = (PcodeRow) data.getRowObject();
 			if (data.isSelected()) {
 				if (row.isNext()) {
-					Color blend = ColorUtils.blend(counterColor, cursorColor, 0.5f);
+					Color blend =
+						ColorUtils.blend(COLOR_BACKGROUND_COUNTER, COLOR_BACKGROUND_CURSOR, 0.5f);
 					if (blend != null) {
 						setBackground(blend);
 					}
@@ -251,7 +267,7 @@ public class DebuggerPcodeStepperProvider extends ComponentProviderAdapter {
 				// else background is already set. Leave it alone
 			}
 			else if (row.isNext()) {
-				setBackground(counterColor);
+				setBackground(COLOR_BACKGROUND_COUNTER);
 			}
 			else {
 				setBackground(pcodeTable.getBackground());
@@ -286,6 +302,7 @@ public class DebuggerPcodeStepperProvider extends ComponentProviderAdapter {
 
 		String injectStyle(String html) {
 			if (StringUtils.startsWithIgnoreCase(html, "<html>")) {
+				String style = computeStyle();
 				return style + html.substring("<html>".length());
 			}
 			return html;
@@ -545,32 +562,6 @@ public class DebuggerPcodeStepperProvider extends ComponentProviderAdapter {
 	@SuppressWarnings("unused")
 	private AutoService.Wiring autoServiceWiring;
 
-	@AutoOptionDefined(
-		name = DebuggerResources.OPTION_NAME_COLORS_PCODE_COUNTER,
-		description = "Background color for the current p-code operation",
-		help = @HelpInfo(anchor = "colors"))
-	private Color counterColor = DebuggerResources.DEFAULT_COLOR_PCODE_COUNTER;
-
-	private Color backgroundColor;
-	private Color cursorColor;
-
-	private Color addressColor;
-	private Color registerColor;
-	private Color scalarColor;
-	private Color localColor;
-	private Color mnemonicColor;
-	private Color unimplColor;
-	private Color separatorColor;
-	private Color lineLabelColor;
-	private Color spaceColor;
-	private Color rawColor;
-	private Color useropColor;
-
-	@SuppressWarnings("unused")
-	private AutoOptions.Wiring autoOptionsWiring;
-
-	String style = "<html>";
-
 	JSplitPane mainPanel = new JSplitPane(JSplitPane.HORIZONTAL_SPLIT);
 
 	final UniqueTableModel uniqueTableModel;
@@ -594,7 +585,6 @@ public class DebuggerPcodeStepperProvider extends ComponentProviderAdapter {
 		pcodeTableModel = new PcodeTableModel(tool);
 
 		this.autoServiceWiring = AutoService.wireServicesConsumed(plugin, this);
-		this.autoOptionsWiring = AutoOptions.wireOptions(plugin, this);
 
 		setIcon(DebuggerResources.ICON_PROVIDER_PCODE);
 		setHelpLocation(DebuggerResources.HELP_PROVIDER_PCODE);
@@ -608,136 +598,21 @@ public class DebuggerPcodeStepperProvider extends ComponentProviderAdapter {
 		contextChanged();
 	}
 
-	@AutoOptionConsumed(
-		name = DebuggerResources.OPTION_NAME_COLORS_PCODE_COUNTER)
-	private void setCounterColor() {
-		pcodeTableModel.fireTableDataChanged();
-	}
-
-	@AutoOptionConsumed(
-		category = GhidraOptions.CATEGORY_BROWSER_DISPLAY,
-		name = BACKGROUND_COLOR)
-	private void setBackgroundColor(Color backgroundColor) {
-		this.backgroundColor = backgroundColor;
-		if (pcodeTable != null) {
-			pcodeTable.setBackground(backgroundColor);
-		}
-	}
-
-	@AutoOptionConsumed(
-		category = GhidraOptions.CATEGORY_BROWSER_FIELDS,
-		name = GhidraOptions.HIGHLIGHT_CURSOR_LINE_COLOR)
-	private void setCursorColor(Color cursorColor) {
-		this.cursorColor = cursorColor;
-		if (pcodeTable != null) {
-			pcodeTable.setSelectionBackground(cursorColor);
-		}
-	}
-
-	@AutoOptionConsumed(
-		category = GhidraOptions.CATEGORY_BROWSER_DISPLAY,
-		name = ADDRESS_COLOR)
-	private void setAddressColor(Color addressColor) {
-		this.addressColor = addressColor;
-		recomputeStyle();
-	}
-
-	@AutoOptionConsumed(
-		category = GhidraOptions.CATEGORY_BROWSER_DISPLAY,
-		name = REGISTERS_COLOR)
-	private void setRegisterColor(Color registerColor) {
-		this.registerColor = registerColor;
-		recomputeStyle();
-	}
-
-	@AutoOptionConsumed(
-		category = GhidraOptions.CATEGORY_BROWSER_DISPLAY,
-		name = CONSTANT_COLOR)
-	private void setScalarColor(Color scalarColor) {
-		this.scalarColor = scalarColor;
-		recomputeStyle();
-	}
-
-	@AutoOptionConsumed(
-		category = GhidraOptions.CATEGORY_BROWSER_DISPLAY,
-		name = LABELS_LOCAL_COLOR)
-	private void setLocalColor(Color localColor) {
-		this.localColor = localColor;
-		recomputeStyle();
-	}
-
-	@AutoOptionConsumed(
-		category = GhidraOptions.CATEGORY_BROWSER_DISPLAY,
-		name = MNEMONIC_COLOR)
-	private void setMnemonicColor(Color mnemonicColor) {
-		this.mnemonicColor = mnemonicColor;
-		recomputeStyle();
-	}
-
-	@AutoOptionConsumed(
-		category = GhidraOptions.CATEGORY_BROWSER_DISPLAY,
-		name = UNIMPL_COLOR)
-	private void setUnimplColor(Color unimplColor) {
-		this.unimplColor = unimplColor;
-		recomputeStyle();
-	}
-
-	@AutoOptionConsumed(
-		category = GhidraOptions.CATEGORY_BROWSER_DISPLAY,
-		name = SEPARATOR_COLOR)
-	private void setSeparatorColor(Color separatorColor) {
-		this.separatorColor = separatorColor;
-		recomputeStyle();
-	}
-
-	@AutoOptionConsumed(
-		category = GhidraOptions.CATEGORY_BROWSER_DISPLAY,
-		name = LINE_LABEL_COLOR)
-	private void setLineLabelColor(Color lineLabelColor) {
-		this.lineLabelColor = lineLabelColor;
-		recomputeStyle();
-	}
-
-	@AutoOptionConsumed(
-		category = GhidraOptions.CATEGORY_BROWSER_DISPLAY,
-		name = SPACE_COLOR)
-	private void setSpaceColor(Color spaceColor) {
-		this.spaceColor = spaceColor;
-		recomputeStyle();
-	}
-
-	@AutoOptionConsumed(
-		category = GhidraOptions.CATEGORY_BROWSER_DISPLAY,
-		name = RAW_COLOR)
-	private void setRawColor(Color rawColor) {
-		this.rawColor = rawColor;
-		recomputeStyle();
-	}
-
-	@AutoOptionConsumed(
-		category = GhidraOptions.CATEGORY_BROWSER_DISPLAY,
-		name = USEROP_COLOR)
-	private void setUseropColor(Color useropColor) {
-		this.useropColor = useropColor;
-		recomputeStyle();
-	}
-
-	protected void recomputeStyle() {
+	protected String computeStyle() {
 		StringBuilder sb = new StringBuilder("<html><head><style>");
-		sb.append(createColoredStyle(SPAN_ADDRESS, addressColor));
-		sb.append(createColoredStyle(SPAN_REGISTER, registerColor));
-		sb.append(createColoredStyle(SPAN_SCALAR, scalarColor));
-		sb.append(createColoredStyle(SPAN_LOCAL, localColor));
-		sb.append(createColoredStyle(SPAN_MNEMONIC, mnemonicColor));
-		sb.append(createColoredStyle(SPAN_UNIMPL, unimplColor));
-		sb.append(createColoredStyle(SPAN_SEPARATOR, separatorColor));
-		sb.append(createColoredStyle(SPAN_LINE_LABEL, lineLabelColor));
-		sb.append(createColoredStyle(SPAN_SPACE, spaceColor));
-		sb.append(createColoredStyle(SPAN_RAW, rawColor));
-		sb.append(createColoredStyle(SPAN_USEROP, useropColor));
+		sb.append(createColoredStyle(SPAN_ADDRESS, COLOR_FOREGROUND_ADDRESS));
+		sb.append(createColoredStyle(SPAN_REGISTER, COLOR_FOREGROUND_REGISTER));
+		sb.append(createColoredStyle(SPAN_SCALAR, COLOR_FOREGROUND_SCALAR));
+		sb.append(createColoredStyle(SPAN_LOCAL, COLOR_FOREGROUND_LOCAL));
+		sb.append(createColoredStyle(SPAN_MNEMONIC, COLOR_FOREGROUND_MNEMONIC));
+		sb.append(createColoredStyle(SPAN_UNIMPL, COLOR_FOREGROUND_UNIMPL));
+		sb.append(createColoredStyle(SPAN_SEPARATOR, COLOR_FOREGROUND_SEPARATOR));
+		sb.append(createColoredStyle(SPAN_LINE_LABEL, COLOR_FOREGROUND_LINE_LABEL));
+		sb.append(createColoredStyle(SPAN_SPACE, COLOR_FOREGROUND_SPACE));
+		sb.append(createColoredStyle(SPAN_RAW, COLOR_FOREGROUND_RAW));
+		sb.append(createColoredStyle(SPAN_USEROP, COLOR_FOREGROUND_USEROP));
 		sb.append("</style></head>"); // NB. </html> should already be at end
-		style = sb.toString();
-		pcodeTableModel.fireTableDataChanged();
+		return sb.toString();
 	}
 
 	protected int measureColWidth(JLabel renderer, String sample) {
@@ -758,6 +633,8 @@ public class DebuggerPcodeStepperProvider extends ComponentProviderAdapter {
 		JPanel pcodeTablePanel = new JPanel(new BorderLayout());
 		pcodeTable = new GhidraTable(pcodeTableModel);
 		pcodeTablePanel.add(pcodeTable, BorderLayout.CENTER);
+		pcodeTable.setBackground(COLOR_BACKGROUND);
+		pcodeTable.setSelectionBackground(COLOR_BACKGROUND_CURSOR);
 
 		JScrollPane pcodeScrollPane = new JScrollPane(pcodeTablePanel,
 			ScrollPaneConstants.VERTICAL_SCROLLBAR_AS_NEEDED,
@@ -777,8 +654,8 @@ public class DebuggerPcodeStepperProvider extends ComponentProviderAdapter {
 		mainPanel.setRightComponent(uniquePanel);
 
 		pcodeTable.setTableHeader(null);
-		pcodeTable.setBackground(backgroundColor);
-		pcodeTable.setSelectionBackground(cursorColor);
+		pcodeTable.setBackground(COLOR_BACKGROUND);
+		pcodeTable.setSelectionBackground(COLOR_BACKGROUND_CURSOR);
 		pcodeTable.setSelectionMode(ListSelectionModel.SINGLE_SELECTION);
 		pcodeTable.getSelectionModel().addListSelectionListener(evt -> {
 			if (evt.getValueIsAdjusting()) {

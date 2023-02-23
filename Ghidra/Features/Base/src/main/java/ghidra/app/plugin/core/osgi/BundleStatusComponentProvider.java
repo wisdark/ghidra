@@ -15,11 +15,11 @@
  */
 package ghidra.app.plugin.core.osgi;
 
-import java.awt.*;
+import java.awt.BorderLayout;
+import java.awt.Dimension;
 import java.io.File;
 import java.io.PrintWriter;
 import java.util.*;
-import java.util.List;
 import java.util.stream.Collectors;
 
 import javax.swing.*;
@@ -31,6 +31,8 @@ import docking.widgets.filechooser.GhidraFileChooserMode;
 import docking.widgets.table.GTable;
 import docking.widgets.table.GTableFilterPanel;
 import generic.jar.ResourceFile;
+import generic.theme.GColor;
+import generic.theme.GIcon;
 import generic.util.Path;
 import ghidra.app.services.ConsoleService;
 import ghidra.framework.plugintool.ComponentProviderAdapter;
@@ -42,7 +44,6 @@ import ghidra.util.filechooser.GhidraFileChooserModel;
 import ghidra.util.filechooser.GhidraFileFilter;
 import ghidra.util.task.*;
 import resources.Icons;
-import resources.ResourceManager;
 
 /**
  * Component for managing OSGi bundle status
@@ -59,7 +60,6 @@ public class BundleStatusComponentProvider extends ComponentProviderAdapter {
 	private final BundleStatusTableModel bundleStatusTableModel;
 	private GTableFilterPanel<BundleStatus> filterPanel;
 
-	private GhidraFileChooser fileChooser;
 	private GhidraFileFilter filter;
 	private final BundleHost bundleHost;
 	private transient boolean isDisposed;
@@ -93,7 +93,6 @@ public class BundleStatusComponentProvider extends ComponentProviderAdapter {
 				return GhidraBundle.getType(file) != GhidraBundle.Type.INVALID;
 			}
 		};
-		this.fileChooser = null;
 
 		build();
 		addToTool();
@@ -105,8 +104,8 @@ public class BundleStatusComponentProvider extends ComponentProviderAdapter {
 
 		bundleStatusTable = new GTable(bundleStatusTableModel);
 		bundleStatusTable.setName("BUNDLESTATUS_TABLE");
-		bundleStatusTable.setSelectionBackground(new Color(204, 204, 255));
-		bundleStatusTable.setSelectionForeground(Color.BLACK);
+		bundleStatusTable.setSelectionBackground(new GColor("color.bg.table.selection.bundle"));
+		bundleStatusTable.setSelectionForeground(new GColor("color.fg.table.selection.bundle"));
 		bundleStatusTable.setSelectionMode(ListSelectionModel.MULTIPLE_INTERVAL_SELECTION);
 
 		// give actions a chance to update status when selection changed
@@ -155,15 +154,15 @@ public class BundleStatusComponentProvider extends ComponentProviderAdapter {
 				.buildAndInstallLocal(this);
 
 		addBundlesAction("EnableBundles", "Enable selected bundle(s)",
-			ResourceManager.loadImage("images/media-playback-start.png"), this::doEnableBundles);
+			new GIcon("icon.plugin.bundlemanager.enable"), this::doEnableBundles);
 
 		addBundlesAction("DisableBundles", "Disable selected bundle(s)",
-			ResourceManager.loadImage("images/media-playback-stop.png"), this::doDisableBundles);
+			new GIcon("icon.plugin.bundlemanager.disable"), this::doDisableBundles);
 
 		addBundlesAction("CleanBundles", "Clean selected bundle build cache(s)",
-			ResourceManager.loadImage("images/erase16.png"), this::doCleanBundleBuildCaches);
+			Icons.CLEAR_ICON, this::doCleanBundleBuildCaches);
 
-		icon = ResourceManager.loadImage("images/Plus.png");
+		icon = Icons.ADD_ICON;
 		new ActionBuilder("AddBundles", this.getName()).popupMenuPath("Add bundle(s)")
 				.popupMenuIcon(icon)
 				.popupMenuGroup(BUNDLE_LIST_GROUP)
@@ -173,7 +172,7 @@ public class BundleStatusComponentProvider extends ComponentProviderAdapter {
 				.onAction(c -> showAddBundlesFileChooser())
 				.buildAndInstallLocal(this);
 
-		icon = ResourceManager.loadImage("images/edit-delete.png");
+		icon = Icons.DELETE_ICON;
 		new ActionBuilder("RemoveBundles", this.getName())
 				.popupMenuPath("Remove selected bundle(s)")
 				.popupMenuIcon(icon)
@@ -248,38 +247,29 @@ public class BundleStatusComponentProvider extends ComponentProviderAdapter {
 	}
 
 	private void showAddBundlesFileChooser() {
-		if (fileChooser == null) {
-			fileChooser = new GhidraFileChooser(getComponent());
-			fileChooser.setMultiSelectionEnabled(true);
-			fileChooser.setFileSelectionMode(GhidraFileChooserMode.FILES_AND_DIRECTORIES);
-			fileChooser.setTitle("Select Bundle(s)");
-			// fileChooser.setApproveButtonToolTipText(title);
-			if (filter != null) {
-				fileChooser.addFileFilter(new GhidraFileFilter() {
-					@Override
-					public String getDescription() {
-						return filter.getDescription();
-					}
 
-					@Override
-					public boolean accept(File f, GhidraFileChooserModel model) {
-						return filter.accept(f, model);
-					}
-				});
-			}
-			String lastSelected = Preferences.getProperty(PREFERENCE_LAST_SELECTED_BUNDLE);
-			if (lastSelected != null) {
-				File lastSelectedFile = new File(lastSelected);
-				fileChooser.setSelectedFile(lastSelectedFile);
-			}
+		GhidraFileChooser fileChooser = new GhidraFileChooser(getComponent());
+		fileChooser.setMultiSelectionEnabled(true);
+		fileChooser.setFileSelectionMode(GhidraFileChooserMode.FILES_AND_DIRECTORIES);
+		fileChooser.setTitle("Select Bundle(s)");
+		// fileChooser.setApproveButtonToolTipText(title);
+		if (filter != null) {
+			fileChooser.addFileFilter(new GhidraFileFilter() {
+				@Override
+				public String getDescription() {
+					return filter.getDescription();
+				}
+
+				@Override
+				public boolean accept(File f, GhidraFileChooserModel model) {
+					return filter.accept(f, model);
+				}
+			});
 		}
-		else {
-			String lastSelected = Preferences.getProperty(PREFERENCE_LAST_SELECTED_BUNDLE);
-			if (lastSelected != null) {
-				File lastSelectedFile = new File(lastSelected);
-				fileChooser.setSelectedFile(lastSelectedFile);
-			}
-			fileChooser.rescanCurrentDirectory();
+		String lastSelected = Preferences.getProperty(PREFERENCE_LAST_SELECTED_BUNDLE);
+		if (lastSelected != null) {
+			File lastSelectedFile = new File(lastSelected);
+			fileChooser.setSelectedFile(lastSelectedFile);
 		}
 
 		List<File> files = fileChooser.getSelectedFiles();
@@ -303,6 +293,8 @@ public class BundleStatusComponentProvider extends ComponentProviderAdapter {
 				}
 			});
 		}
+
+		fileChooser.dispose();
 	}
 
 	protected List<BundleStatus> getSelectedStatuses() {

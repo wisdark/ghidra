@@ -312,7 +312,7 @@ public class BytesTracePcodeEmulatorTest extends AbstractTracePcodeEmulatorTest 
 	 * This may not reflect the semantics of an actual processor in these situations, since they may
 	 * have instruction caching. Emulating such semantics is TODO, if at all. NB. This also tests
 	 * that PC-relative addressing works, since internally the emulator advances the counter after
-	 * execution of each instruction. Addressing is computed by the SLEIGH instruction parser and
+	 * execution of each instruction. Addressing is computed by the Sleigh instruction parser and
 	 * encoded as a constant deref in the p-code.
 	 */
 	@Test
@@ -327,7 +327,7 @@ public class BytesTracePcodeEmulatorTest extends AbstractTracePcodeEmulatorTest 
 					""",
 				List.of(
 					// First instruction undoes the modification above
-					"XOR byte ptr [0x00400007], 0xcc", // 7 bytes
+					"XOR byte ptr [0x00400007], 0xcc",  // 7 bytes
 					"MOV EAX,0xdeadbeef"));            // 5 bytes
 
 			BytesTracePcodeEmulator emu = new BytesTracePcodeEmulator(tb.host, 0);

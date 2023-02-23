@@ -15,6 +15,7 @@
  */
 package agent.dbgmodel.model.impl;
 
+import java.lang.invoke.MethodHandles;
 import java.util.*;
 import java.util.Map.Entry;
 import java.util.concurrent.CompletableFuture;
@@ -32,12 +33,12 @@ import agent.dbgmodel.jna.dbgmodel.DbgModelNative.ModelObjectKind;
 import agent.dbgmodel.jna.dbgmodel.DbgModelNative.TypeKind;
 import agent.dbgmodel.manager.DbgManager2Impl;
 import ghidra.async.AsyncUtils;
-import ghidra.dbg.DebuggerModelListener;
 import ghidra.dbg.agent.DefaultTargetObject;
 import ghidra.dbg.target.*;
 import ghidra.dbg.target.TargetBreakpointSpec.TargetBreakpointKind;
 import ghidra.dbg.target.TargetBreakpointSpecContainer.TargetBreakpointKindSet;
 import ghidra.dbg.target.TargetExecutionStateful.TargetExecutionState;
+import ghidra.dbg.target.TargetMethod.AnnotatedTargetMethod;
 import ghidra.dbg.target.schema.TargetObjectSchema;
 import ghidra.dbg.util.PathUtils;
 import ghidra.dbg.util.PathUtils.TargetObjectKeyComparator;
@@ -250,14 +251,9 @@ public class DbgModel2TargetObjectImpl extends DefaultTargetObject<TargetObject,
 			}
 			if (proxy instanceof TargetExecutionStateful) {
 				if (isValid()) {
-					if (attributes.containsKey(TargetExecutionStateful.STATE_ATTRIBUTE_NAME)) {
-						TargetExecutionStateful stateful = (TargetExecutionStateful) proxy;
-						TargetExecutionState state = stateful.getExecutionState();
-						attrs.put(TargetExecutionStateful.STATE_ATTRIBUTE_NAME, state);
-					} else {
-						attrs.put(TargetExecutionStateful.STATE_ATTRIBUTE_NAME,
-							TargetExecutionState.INACTIVE);
-					}
+					TargetExecutionStateful stateful = (TargetExecutionStateful) proxy;
+					TargetExecutionState state = stateful.getExecutionState();
+					attrs.put(TargetExecutionStateful.STATE_ATTRIBUTE_NAME, state);
 				}
 			}
 			if (proxy instanceof TargetAttacher) {
@@ -307,6 +303,8 @@ public class DbgModel2TargetObjectImpl extends DefaultTargetObject<TargetObject,
 				String executionType =
 					targetThread.getThread().getExecutingProcessorType().description;
 				attrs.put(TargetEnvironment.ARCH_ATTRIBUTE_NAME, executionType);
+				attrs.putAll(
+					AnnotatedTargetMethod.collectExports(MethodHandles.lookup(), model, proxy));
 			}
 			if (proxy instanceof TargetRegister) {
 				DbgModelTargetObject bank = (DbgModelTargetObject) getParent();
@@ -410,11 +408,6 @@ public class DbgModel2TargetObjectImpl extends DefaultTargetObject<TargetObject,
 				ex);
 			return null;
 		});
-	}
-
-	@Override
-	public void removeListener(DebuggerModelListener l) {
-		listeners.remove(l);
 	}
 
 	@Override

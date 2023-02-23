@@ -33,15 +33,21 @@ public class LldbRemoteConnectionCommand extends AbstractLldbCommand<Set<SBThrea
 	private LldbProcessCreatedEvent created = null;
 	private boolean completed = false;
 	private String key;
+	private boolean auto = true;
 	private boolean async = false;
+	private boolean kernel = false;
 
 	public LldbRemoteConnectionCommand(LldbManagerImpl manager, String key) {
-		this(manager, key, false);
+		this(manager, key, true, false, false);
 	}
 
-	public LldbRemoteConnectionCommand(LldbManagerImpl manager, String key, boolean async) {
+	public LldbRemoteConnectionCommand(LldbManagerImpl manager, String key, boolean auto,
+			boolean async, boolean kernel) {
 		super(manager);
 		this.key = key;
+		this.auto = auto;
+		this.async = async;
+		this.kernel = kernel;
 	}
 
 	@Override
@@ -74,6 +80,6 @@ public class LldbRemoteConnectionCommand extends AbstractLldbCommand<Set<SBThrea
 	@Override
 	public void invoke() {
 		DebugClient client = manager.getClient();
-		client.connectRemote(client.getLocalServer(), key, async);
+		client.connectRemote(client.getLocalServer(), key, auto, async, kernel);
 	}
 }

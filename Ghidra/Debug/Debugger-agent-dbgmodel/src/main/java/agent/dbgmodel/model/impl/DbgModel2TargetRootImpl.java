@@ -179,8 +179,14 @@ public class DbgModel2TargetRootImpl extends DbgModel2DefaultTargetModelRoot
 				System.err.println("processAdded - null");
 				return;
 			}
-			getListeners().fire.event(getProxy(), null, TargetEventType.PROCESS_CREATED,
-				"Process " + proc.getId() + " started " + "notepad.exe" + " pid=" + proc.getPid(),
+			DbgModelTargetProcessContainer container =
+				(DbgModelTargetProcessContainer) targetProcess.getParent();
+			DelegateDbgModel2TargetObject delegate =
+				(DelegateDbgModel2TargetObject) container.getDelegate();
+			delegate.init();
+
+			broadcast().event(getProxy(), null, TargetEventType.PROCESS_CREATED,
+				"Process " + proc.getId() + " started " + " pid=" + proc.getPid(),
 				List.of(targetProcess));
 		});
 	}
@@ -193,7 +199,13 @@ public class DbgModel2TargetRootImpl extends DbgModel2DefaultTargetModelRoot
 				System.err.println("threadCreated - null");
 				return;
 			}
-			getListeners().fire.event(getProxy(), targetThread, TargetEventType.THREAD_CREATED,
+			DbgModelTargetThreadContainer container =
+				(DbgModelTargetThreadContainer) targetThread.getParent();
+			DelegateDbgModel2TargetObject cdelegate =
+				(DelegateDbgModel2TargetObject) container.getDelegate();
+			cdelegate.init();
+
+			broadcast().event(getProxy(), targetThread, TargetEventType.THREAD_CREATED,
 				"Thread " + thread.getId() + " started", List.of(targetThread));
 			DelegateDbgModel2TargetObject delegate =
 				(DelegateDbgModel2TargetObject) targetThread.getDelegate();
@@ -210,7 +222,7 @@ public class DbgModel2TargetRootImpl extends DbgModel2DefaultTargetModelRoot
 			}
 			getObject(getManager().getEventThread()).thenAccept(t -> {
 				TargetThread eventThread = (TargetThread) t;
-				getListeners().fire.event(getProxy(), eventThread, TargetEventType.MODULE_LOADED,
+				broadcast().event(getProxy(), eventThread, TargetEventType.MODULE_LOADED,
 					"Library " + info.getModuleName() + " loaded", List.of(mod));
 			});
 			getObject(getManager().getEventProcess()).thenAccept(p -> {
@@ -231,7 +243,7 @@ public class DbgModel2TargetRootImpl extends DbgModel2DefaultTargetModelRoot
 			}
 			getObject(getManager().getEventThread()).thenAccept(t -> {
 				TargetThread eventThread = (TargetThread) t;
-				getListeners().fire.event(getProxy(), eventThread, TargetEventType.MODULE_UNLOADED,
+				broadcast().event(getProxy(), eventThread, TargetEventType.MODULE_UNLOADED,
 					"Library " + info.getModuleName() + " unloaded", List.of(mod));
 			});
 			getObject(getManager().getEventProcess()).thenAccept(p -> {
@@ -273,8 +285,9 @@ public class DbgModel2TargetRootImpl extends DbgModel2DefaultTargetModelRoot
 		List<String> xpath = new ArrayList<>();
 		xpath.addAll(objPath);
 		xpath.addAll(ext);
+		// NB: fetchModelObject may have to be called with false
 		return AsyncUtils.sequence(TypeSpec.cls(DbgModelTargetObject.class)).then(seq -> {
-			getModel().fetchModelObject(xpath).handle(seq::next);
+			getModel().fetchModelObject(xpath, false).handle(seq::next);
 		}, TypeSpec.cls(TargetObject.class)).then((pobj, seq) -> {
 			if (pobj == null) {
 				seq.exit();
@@ -369,7 +382,7 @@ public class DbgModel2TargetRootImpl extends DbgModel2DefaultTargetModelRoot
 					DbgModelTargetProcessImpl.EXIT_CODE_ATTRIBUTE_NAME, proc.getExitCode() //
 				), "Exited");
 			}
-			getListeners().fire.event(targetProcess.getProxy(), null,
+			broadcast().event(targetProcess.getProxy(), null,
 				TargetEventType.PROCESS_EXITED,
 				"Process " + proc.getId() + " exited code=" + proc.getExitCode(),
 				List.of(getProxy()));
@@ -383,7 +396,7 @@ public class DbgModel2TargetRootImpl extends DbgModel2DefaultTargetModelRoot
 				return;
 			}
 			DbgModelTargetThread targetThread = (DbgModelTargetThread) thread.getProxy();
-			getListeners().fire.event(getProxy(), targetThread, TargetEventType.THREAD_EXITED,
+			broadcast().event(getProxy(), targetThread, TargetEventType.THREAD_EXITED,
 				"Thread " + threadId + " exited", List.of(targetThread));
 		});
 	}
@@ -401,7 +414,7 @@ public class DbgModel2TargetRootImpl extends DbgModel2DefaultTargetModelRoot
 			), reason.desc());
 			intrinsics.put(TargetEventScope.EVENT_OBJECT_ATTRIBUTE_NAME, targetThread);
 			TargetEventType eventType = getEventType(state, cause, reason);
-			getListeners().fire.event(getProxy(), targetThread, eventType,
+			broadcast().event(getProxy(), targetThread, eventType,
 				"Thread " + thread.getId() + " state changed", List.of(targetThread));
 			DelegateDbgModel2TargetObject delegate =
 				(DelegateDbgModel2TargetObject) targetThread.getDelegate();
@@ -472,7 +485,7 @@ public class DbgModel2TargetRootImpl extends DbgModel2DefaultTargetModelRoot
 
 					DbgThread thread = info.getEventThread();
 					TargetObject targetThread = getModel().getModelObject(thread);
-					listeners.fire.breakpointHit(bpt.getParent(), targetThread, null, bpt, bpt);
+					broadcast().breakpointHit(bpt.getParent(), targetThread, null, bpt, bpt);
 					bpt.breakpointHit();
 				});
 	}

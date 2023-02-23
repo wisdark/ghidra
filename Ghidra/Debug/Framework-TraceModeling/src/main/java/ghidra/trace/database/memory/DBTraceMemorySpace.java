@@ -270,7 +270,7 @@ public class DBTraceMemorySpace
 
 	@Override
 	public DBTraceCodeSpace getCodeSpace(boolean createIfAbsent) {
-		if (space.isRegisterSpace()) {
+		if (space.isRegisterSpace() && !space.isOverlaySpace()) {
 			return trace.getCodeManager().getCodeRegisterSpace(thread, frameLevel, createIfAbsent);
 		}
 		return trace.getCodeManager().getCodeSpace(space, createIfAbsent);
@@ -295,7 +295,9 @@ public class DBTraceMemorySpace
 		if (state == null) {
 			throw new NullPointerException();
 		}
-
+		var l = new Object() {
+			boolean changed;
+		};
 		new AddressRangeMapSetter<Entry<TraceAddressSnapRange, TraceMemoryState>, TraceMemoryState>() {
 			@Override
 			protected AddressRange getRange(Entry<TraceAddressSnapRange, TraceMemoryState> entry) {
@@ -324,6 +326,8 @@ public class DBTraceMemorySpace
 			@Override
 			protected Entry<TraceAddressSnapRange, TraceMemoryState> put(AddressRange range,
 					TraceMemoryState value) {
+				// This should not get called if the range is already the desired state
+				l.changed = true;
 				if (value != TraceMemoryState.UNKNOWN) {
 					stateMapSpace.put(new ImmutableTraceAddressSnapRange(range, snap), value);
 				}
@@ -331,8 +335,10 @@ public class DBTraceMemorySpace
 			}
 		}.set(start, end, state);
 
-		trace.setChanged(new TraceChangeRecord<>(TraceMemoryStateChangeType.CHANGED, this,
-			new ImmutableTraceAddressSnapRange(start, end, snap, snap), state));
+		if (l.changed) {
+			trace.setChanged(new TraceChangeRecord<>(TraceMemoryStateChangeType.CHANGED, this,
+				new ImmutableTraceAddressSnapRange(start, end, snap, snap), state));
+		}
 	}
 
 	protected void checkState(TraceMemoryState state) {
@@ -628,7 +634,8 @@ public class DBTraceMemorySpace
 		if (!remaining.isEmpty()) {
 			lastSnap.snap = Long.MAX_VALUE;
 			for (AddressRange rng : remaining) {
-				changed.add(new ImmutableTraceAddressSnapRange(rng, Lifespan.nowOn(loc.snap)));
+				changed.add(
+					new ImmutableTraceAddressSnapRange(rng, Lifespan.nowOnMaybeScratch(loc.snap)));
 			}
 		}
 		buf.position(pos);

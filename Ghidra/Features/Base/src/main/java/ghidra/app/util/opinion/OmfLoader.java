@@ -25,20 +25,20 @@ import ghidra.app.util.bin.ByteProvider;
 import ghidra.app.util.bin.format.omf.*;
 import ghidra.app.util.bin.format.omf.OmfFixupRecord.Subrecord;
 import ghidra.app.util.importer.MessageLog;
-import ghidra.program.model.address.Address;
-import ghidra.program.model.address.AddressOverflowException;
+import ghidra.program.database.function.OverlappingFunctionException;
+import ghidra.program.model.address.*;
 import ghidra.program.model.data.DataType;
 import ghidra.program.model.data.Undefined;
 import ghidra.program.model.lang.Language;
 import ghidra.program.model.listing.*;
 import ghidra.program.model.mem.*;
+import ghidra.program.model.reloc.Relocation.Status;
 import ghidra.program.model.symbol.*;
 import ghidra.program.model.util.CodeUnitInsertionException;
 import ghidra.util.DataConverter;
 import ghidra.util.exception.CancelledException;
 import ghidra.util.exception.InvalidInputException;
 import ghidra.util.task.TaskMonitor;
-import ghidra.util.task.TaskMonitorAdapter;
 
 public class OmfLoader extends AbstractProgramWrapperLoader {
 	public final static String OMF_NAME = "Relocatable Object Module Format (OMF)";
@@ -85,7 +85,7 @@ public class OmfLoader extends AbstractProgramWrapperLoader {
 			reader.setPointerIndex(0);
 			OmfFileHeader scan;
 			try {
-				scan = OmfFileHeader.scan(reader, TaskMonitorAdapter.DUMMY_MONITOR, true);
+				scan = OmfFileHeader.scan(reader, TaskMonitor.DUMMY, true);
 			}
 			catch (OmfException e) {
 				throw new IOException("Bad header format: " + e.getMessage());
@@ -115,7 +115,7 @@ public class OmfLoader extends AbstractProgramWrapperLoader {
 		OmfFileHeader header = null;
 		BinaryReader reader = OmfFileHeader.createReader(provider);
 		try {
-			header = OmfFileHeader.parse(reader, monitor);
+			header = OmfFileHeader.parse(reader, monitor, log);
 			header.resolveNames();
 			header.sortSegmentDataBlocks();
 			OmfFileHeader.doLinking(IMAGE_BASE, header.getSegments(), header.getGroups());
@@ -132,20 +132,14 @@ public class OmfLoader extends AbstractProgramWrapperLoader {
 		// the original bytes.
 		MemoryBlockUtils.createFileBytes(program, provider, monitor);
 
-		int id = program.startTransaction("loading program from OMF");
-		boolean success = false;
 		try {
 			processSegmentHeaders(reader, header, program, monitor, log);
 			processExternalSymbols(header, program, monitor, log);
 			processPublicSymbols(header, program, monitor, log);
 			processRelocations(header, program, monitor, log);
-			success = true;
 		}
 		catch (AddressOverflowException e) {
 			throw new IOException(e);
-		}
-		finally {
-			program.endTransaction(id, success);
 		}
 	}
 
@@ -269,8 +263,9 @@ public class OmfLoader extends AbstractProgramWrapperLoader {
 					}
 					long[] values = new long[1];
 					values[0] = finalvalue;
-					program.getRelocationTable().add(state.locAddress, state.locationType, values,
-						origbytes, null);
+					program.getRelocationTable()
+							.add(state.locAddress, Status.APPLIED,
+								state.locationType, values, origbytes, null);
 				}
 			}
 		}
@@ -284,7 +279,6 @@ public class OmfLoader extends AbstractProgramWrapperLoader {
 	 * @param reader is a reader for the underlying file
 	 * @param header is the OMF file header
 	 * @param program is the Program
-	 * @param mbu is the block creation utility
 	 * @param monitor is checked for cancellation
 	 * @param log receives error messages
 	 * @throws AddressOverflowException if the underlying data stream causes an address to wrap
@@ -396,12 +390,14 @@ public class OmfLoader extends AbstractProgramWrapperLoader {
 				break;
 			}
 			Address addrBase = null;
+			boolean tagFunction = false;
 			if (symbolrec.getSegmentIndex() != 0) {
 				// TODO: What does it mean if both the segment and group index are non-zero?
 				//     Is the segment index group relative?
 				//     For now we assume if a segment index is present, we don't need the group index
 				OmfSegmentHeader baseSegment = segments.get(symbolrec.getSegmentIndex() - 1);
 				addrBase = baseSegment.getAddress(language);
+				tagFunction = baseSegment.isCode();
 			}
 			else if (symbolrec.getGroupIndex() != 0) {
 				OmfGroupRecord baseGroup = groups.get(symbolrec.getGroupIndex() - 1);
@@ -415,10 +411,32 @@ public class OmfLoader extends AbstractProgramWrapperLoader {
 			int numSymbols = symbolrec.numSymbols();
 			for (int i = 0; i < numSymbols; ++i) {
 				OmfSymbol symbol = symbolrec.getSymbol(i);
-				Address address = addrBase.add(symbol.getOffset());
-				symbol.setAddress(address);
+				try {
+					Address address = addrBase.add(symbol.getOffset());
+					symbol.setAddress(address);
 
-				createSymbol(symbol, address, symbolTable, log);
+					createSymbol(symbol, address, symbolTable, log);
+					if (tagFunction) {
+						// Create a dummy function so that EntryPointAnalyzer will disassemble it
+						try {
+							program.getFunctionManager()
+									.createFunction(symbol.getName(), address,
+										new AddressSet(address), SourceType.IMPORTED);
+						}
+						catch (OverlappingFunctionException e) {
+							log.appendMsg("Function already exists at address " + address + ": " +
+								e.getMessage());
+						}
+						catch (InvalidInputException e) {
+							log.appendMsg("Unable to create function with invalid name " +
+								symbol.getName() + ": " + e.getMessage());
+						}
+					}
+				}
+				catch (AddressOutOfBoundsException e) {
+					log.appendMsg(
+						"Unable to create symbol " + symbol.getName() + ": " + e.getMessage());
+				}
 			}
 		}
 	}
@@ -483,9 +501,8 @@ public class OmfLoader extends AbstractProgramWrapperLoader {
 		monitor.setMessage("Creating External Symbols");
 
 		for (OmfExternalSymbol symbolrec : symbolrecs) {
-			OmfSymbol[] symbols = symbolrec.getSymbols();
 			// TODO: Check instanceof OmfComdefRecord
-			for (OmfSymbol symbol : symbols) {
+			for (OmfSymbol symbol : symbolrec.getSymbols()) {
 				if (monitor.isCancelled()) {
 					break;
 				}

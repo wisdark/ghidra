@@ -17,6 +17,8 @@ package ghidra.program.model.data;
 
 import java.io.Serializable;
 
+import org.apache.commons.lang3.StringUtils;
+
 import ghidra.docking.settings.Settings;
 import ghidra.docking.settings.SettingsImpl;
 import ghidra.program.database.data.DataTypeUtilities;
@@ -57,8 +59,8 @@ public class DataTypeComponentImpl implements InternalDataTypeComponent, Seriali
 		this.offset = offset;
 		this.length = length;
 		this.fieldName = fieldName;
-		this.comment = comment;
 		setDataType(dataType);
+		setComment(comment);
 	}
 
 	/**
@@ -115,13 +117,13 @@ public class DataTypeComponentImpl implements InternalDataTypeComponent, Seriali
 
 	@Override
 	public void setComment(String comment) {
-		this.comment = comment;
+		this.comment = StringUtils.isBlank(comment) ? null : comment;
 	}
 
 	@Override
 	public String getFieldName() {
 		if (isZeroBitFieldComponent()) {
-			return "";
+			return null;
 		}
 		return fieldName;
 	}
@@ -198,7 +200,7 @@ public class DataTypeComponentImpl implements InternalDataTypeComponent, Seriali
 		// this.fieldName =  = checkFieldName(name);
 		this.fieldName = name;
 		this.dataType = dt;
-		this.comment = cmt;
+		this.comment = StringUtils.isBlank(cmt) ? null : cmt;
 	}
 
 	@Override

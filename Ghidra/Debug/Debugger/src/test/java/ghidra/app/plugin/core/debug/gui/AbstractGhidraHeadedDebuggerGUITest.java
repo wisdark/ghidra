@@ -269,6 +269,24 @@ public abstract class AbstractGhidraHeadedDebuggerGUITest
 		}, () -> lastError.get().getMessage());
 	}
 
+	public static <T> T waitForPass(Supplier<T> supplier) {
+		var locals = new Object() {
+			AssertionError lastError;
+			T value;
+		};
+		waitForCondition(() -> {
+			try {
+				locals.value = supplier.get();
+				return true;
+			}
+			catch (AssertionError e) {
+				locals.lastError = e;
+				return false;
+			}
+		}, () -> locals.lastError.getMessage());
+		return locals.value;
+	}
+
 	protected static Set<String> getMenuElementsText(MenuElement menu) {
 		Set<String> result = new HashSet<>();
 		for (MenuElement sub : menu.getSubElements()) {
@@ -441,7 +459,7 @@ public abstract class AbstractGhidraHeadedDebuggerGUITest
 			assertNotNull("Cannot get cursor bounds", cursor);
 			Color actual = new Color(image.getRGB(locFP.x + cursor.x - 1,
 				locFP.y + cursor.y + cursor.height * 3 / 2 + yAdjust));
-			assertEquals(expected, actual);
+			assertEquals(expected.getRGB(), actual.getRGB());
 		});
 	}
 

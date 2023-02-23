@@ -34,6 +34,7 @@ import ghidra.trace.model.memory.TraceMemoryRegion;
 import ghidra.trace.model.program.TraceProgramView;
 import ghidra.trace.model.program.TraceProgramViewMemory;
 import ghidra.trace.util.MemoryAdapter;
+import ghidra.util.LockHold;
 import ghidra.util.MathUtilities;
 import ghidra.util.exception.CancelledException;
 import ghidra.util.exception.NotFoundException;
@@ -79,9 +80,11 @@ public abstract class AbstractDBTraceProgramViewMemory
 		}
 	}
 
-	protected synchronized void computeFullAdddressSet() {
+	protected void computeFullAdddressSet() {
 		AddressSet temp = new AddressSet();
-		forPhysicalSpaces(space -> temp.add(space.getMinAddress(), space.getMaxAddress()));
+		try (LockHold hold = program.trace.lockRead()) {
+			forPhysicalSpaces(space -> temp.add(space.getMinAddress(), space.getMaxAddress()));
+		}
 		addressSet = temp;
 	}
 
@@ -163,7 +166,7 @@ public abstract class AbstractDBTraceProgramViewMemory
 
 	@Override
 	public LiveMemoryHandler getLiveMemoryHandler() {
-		return null;
+		return memoryWriteRedirect;
 	}
 
 	@Override
@@ -254,7 +257,7 @@ public abstract class AbstractDBTraceProgramViewMemory
 	}
 
 	@Override
-	public MemoryBlock convertToInitialized(MemoryBlock unitializedBlock, byte initialValue)
+	public MemoryBlock convertToInitialized(MemoryBlock uninitializedBlock, byte initialValue)
 			throws LockException, MemoryBlockException, NotFoundException {
 		throw new UnsupportedOperationException();
 	}

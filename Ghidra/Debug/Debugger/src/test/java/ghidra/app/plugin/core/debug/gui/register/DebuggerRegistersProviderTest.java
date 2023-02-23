@@ -32,12 +32,11 @@ import ghidra.app.plugin.core.debug.gui.action.NoneLocationTrackingSpec;
 import ghidra.app.plugin.core.debug.gui.listing.DebuggerListingPlugin;
 import ghidra.app.plugin.core.debug.gui.register.DebuggerRegistersProvider.RegisterDataSettingsDialog;
 import ghidra.app.plugin.core.debug.gui.register.DebuggerRegistersProvider.RegisterTableColumns;
-import ghidra.app.plugin.core.debug.service.editing.DebuggerStateEditingServicePlugin;
-import ghidra.app.services.DebuggerStateEditingService;
-import ghidra.app.services.DebuggerStateEditingService.StateEditingMode;
-import ghidra.app.services.TraceRecorder;
+import ghidra.app.plugin.core.debug.service.control.DebuggerControlServicePlugin;
+import ghidra.app.services.*;
 import ghidra.docking.settings.FormatSettingsDefinition;
 import ghidra.docking.settings.Settings;
+import ghidra.program.model.address.AddressSpace;
 import ghidra.program.model.data.*;
 import ghidra.program.model.lang.Register;
 import ghidra.program.model.util.CodeUnitInsertionException;
@@ -58,7 +57,7 @@ public class DebuggerRegistersProviderTest extends AbstractGhidraHeadedDebuggerG
 	protected DebuggerRegistersPlugin registersPlugin;
 	protected DebuggerRegistersProvider registersProvider;
 	protected DebuggerListingPlugin listingPlugin;
-	protected DebuggerStateEditingService editingService;
+	protected DebuggerControlService editingService;
 
 	protected Register r0;
 	protected Register pc;
@@ -79,7 +78,7 @@ public class DebuggerRegistersProviderTest extends AbstractGhidraHeadedDebuggerG
 		registersPlugin = addPlugin(tool, DebuggerRegistersPlugin.class);
 		registersProvider = waitForComponentProvider(DebuggerRegistersProvider.class);
 		listingPlugin = addPlugin(tool, DebuggerListingPlugin.class);
-		editingService = addPlugin(tool, DebuggerStateEditingServicePlugin.class);
+		editingService = addPlugin(tool, DebuggerControlServicePlugin.class);
 
 		createTrace();
 		r0 = tb.language.getRegister("r0");
@@ -139,9 +138,11 @@ public class DebuggerRegistersProviderTest extends AbstractGhidraHeadedDebuggerG
 			throws CodeUnitInsertionException {
 		TraceCodeSpace regCode =
 			tb.trace.getCodeManager().getCodeRegisterSpace(thread, true);
-		regCode.definedData().create(Lifespan.nowOn(0), pc, PointerDataType.dataType);
-		// TODO: Pointer needs to be to ram, not register space
-		regCode.definedData().create(Lifespan.nowOn(0), r0, r0Struct);
+		DataTypeManager dtm = tb.trace.getDataTypeManager();
+		AddressSpace space = tb.host.getAddressFactory().getDefaultAddressSpace();
+		PointerTypedef ramPtr = new PointerTypedef(null, VoidDataType.dataType, -1, dtm, space);
+		regCode.definedData().create(getPlatform(), Lifespan.nowOn(0), pc, ramPtr);
+		regCode.definedData().create(getPlatform(), Lifespan.nowOn(0), r0, r0Struct);
 	}
 
 	protected void addRegisterTypes(TraceThread thread) throws CodeUnitInsertionException {
@@ -382,7 +383,7 @@ public class DebuggerRegistersProviderTest extends AbstractGhidraHeadedDebuggerG
 		activateThread(thread);
 		waitForSwing();
 
-		editingService.setCurrentMode(tb.trace, StateEditingMode.WRITE_EMULATOR);
+		editingService.setCurrentMode(tb.trace, ControlMode.RW_EMULATOR);
 
 		assertTrue(registersProvider.actionEnableEdits.isEnabled());
 		performAction(registersProvider.actionEnableEdits);
@@ -420,7 +421,7 @@ public class DebuggerRegistersProviderTest extends AbstractGhidraHeadedDebuggerG
 		activateThread(thread);
 		waitForSwing();
 
-		editingService.setCurrentMode(tb.trace, StateEditingMode.WRITE_EMULATOR);
+		editingService.setCurrentMode(tb.trace, ControlMode.RW_EMULATOR);
 
 		assertTrue(registersProvider.actionEnableEdits.isEnabled());
 		performAction(registersProvider.actionEnableEdits);

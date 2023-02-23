@@ -15,6 +15,7 @@
  */
 package ghidra.pcode.exec;
 
+import java.io.IOException;
 import java.util.*;
 
 import ghidra.app.plugin.processors.sleigh.SleighLanguage;
@@ -22,9 +23,12 @@ import ghidra.app.plugin.processors.sleigh.template.OpTpl;
 import ghidra.app.util.pcode.AbstractAppender;
 import ghidra.app.util.pcode.AbstractPcodeFormatter;
 import ghidra.pcodeCPort.slghsymbol.UserOpSymbol;
-import ghidra.program.model.lang.Language;
+import ghidra.program.model.lang.*;
 import ghidra.program.model.listing.Instruction;
+import ghidra.program.model.listing.Program;
+import ghidra.program.model.mem.MemoryAccessException;
 import ghidra.program.model.pcode.PcodeOp;
+import ghidra.util.exception.NotFoundException;
 
 /**
  * A p-code program to be executed by a {@link PcodeExecutor}
@@ -89,19 +93,51 @@ public class PcodeProgram {
 	}
 
 	/**
+	 * Generate a p-code program from the given instruction, without overrides
+	 * 
+	 * @param instruction the instruction
+	 * @return the p-code program
+	 */
+	public static PcodeProgram fromInstruction(Instruction instruction) {
+		return fromInstruction(instruction, false);
+	}
+
+	/**
 	 * Generate a p-code program from the given instruction
 	 * 
 	 * @param instruction the instruction
-	 * @return the p-code program.
+	 * @param includeOverrides as in {@link Instruction#getPcode(boolean)}
+	 * @return the p-code program
 	 */
-	public static PcodeProgram fromInstruction(Instruction instruction) {
+	public static PcodeProgram fromInstruction(Instruction instruction, boolean includeOverrides) {
 		Language language = instruction.getPrototype().getLanguage();
 		if (!(language instanceof SleighLanguage)) {
 			throw new IllegalArgumentException("Instruction must be parsed using Sleigh");
 		}
-		PcodeOp[] pcode = instruction.getPcode(false);
-		return new PcodeProgram((SleighLanguage) language, List.of(pcode),
-			Map.of());
+		PcodeOp[] pcode = instruction.getPcode(includeOverrides);
+		return new PcodeProgram((SleighLanguage) language, List.of(pcode), Map.of());
+	}
+
+	/**
+	 * Generate a p-code program from a given program's inject library
+	 * 
+	 * @param program the program
+	 * @param name the name of the snippet
+	 * @param type the type of the snippet
+	 * @return the p-code program
+	 * @throws MemoryAccessException for problems establishing the injection context
+	 * @throws IOException for problems while emitting the injection p-code
+	 * @throws UnknownInstructionException if there is no underlying instruction being injected
+	 * @throws NotFoundException if an expected aspect of the injection is not present in context
+	 */
+	public static PcodeProgram fromInject(Program program, String name, int type)
+			throws MemoryAccessException, UnknownInstructionException, NotFoundException,
+			IOException {
+		PcodeInjectLibrary library = program.getCompilerSpec().getPcodeInjectLibrary();
+		InjectContext ctx = library.buildInjectContext();
+		InjectPayload payload = library.getPayload(type, name);
+		PcodeOp[] pcode = payload.getPcode(program, ctx);
+		return new PcodeProgram((SleighLanguage) program.getLanguage(), List.of(pcode), Map.of());
 	}
 
 	protected final SleighLanguage language;

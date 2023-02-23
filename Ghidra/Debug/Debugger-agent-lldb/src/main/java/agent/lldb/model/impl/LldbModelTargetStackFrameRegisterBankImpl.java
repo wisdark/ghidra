@@ -16,22 +16,28 @@
 package agent.lldb.model.impl;
 
 import java.math.BigInteger;
-import java.util.*;
+import java.util.Collection;
+import java.util.HashMap;
+import java.util.List;
+import java.util.Map;
 import java.util.concurrent.CompletableFuture;
 import java.util.stream.Collectors;
 
-import SWIG.*;
+import SWIG.SBStream;
+import SWIG.SBValue;
+import SWIG.StateType;
 import agent.lldb.manager.LldbReason;
 import agent.lldb.model.iface2.LldbModelTargetRegister;
 import agent.lldb.model.iface2.LldbModelTargetStackFrameRegisterBank;
 import ghidra.async.AsyncUtils;
-import ghidra.dbg.DebuggerModelListener;
 import ghidra.dbg.error.DebuggerRegisterAccessException;
 import ghidra.dbg.target.TargetObject;
-import ghidra.dbg.target.schema.*;
+import ghidra.dbg.target.schema.TargetAttributeType;
+import ghidra.dbg.target.schema.TargetElementType;
 import ghidra.dbg.target.schema.TargetObjectSchema.ResyncMode;
+import ghidra.dbg.target.schema.TargetObjectSchemaInfo;
 import ghidra.dbg.util.PathUtils;
-import ghidra.util.datastruct.ListenerSet;
+import ghidra.util.Msg;
 
 @TargetObjectSchemaInfo(
 	name = "RegisterValueBank",
@@ -63,9 +69,10 @@ public class LldbModelTargetStackFrameRegisterBankImpl
 			DISPLAY_ATTRIBUTE_NAME, getName(),
 			DESCRIPTIONS_ATTRIBUTE_NAME, container), "Initialized");
 
-		requestElements(false);
+		requestElements(true);
 	}
 
+	@Override
 	public String getDescription(int level) {
 		SBStream stream = new SBStream();
 		SBValue val = (SBValue) getModelObject();
@@ -80,6 +87,9 @@ public class LldbModelTargetStackFrameRegisterBankImpl
 	public CompletableFuture<Void> requestElements(boolean refresh) {
 		SBValue bank = (SBValue) getModelObject();
 		return getManager().listStackFrameRegisters(bank).thenAccept(regs -> {
+			if (regs.isEmpty()) {
+				return;
+			}
 			List<TargetObject> registers;
 			synchronized (this) {
 				registers = regs.values()
@@ -105,6 +115,7 @@ public class LldbModelTargetStackFrameRegisterBankImpl
 		return new LldbModelTargetStackFrameRegisterImpl(this, register);
 	}
 
+	@Override
 	public void threadStateChangedSpecific(StateType state, LldbReason reason) {
 		if (state.equals(StateType.eStateStopped)) {
 			requestElements(false).thenAccept(__ -> {
@@ -120,19 +131,18 @@ public class LldbModelTargetStackFrameRegisterBankImpl
 		Map<String, TargetObject> elements = getCachedElements();
 		for (String regname : names) {
 			if (!elements.containsKey(regname)) {
-				throw new DebuggerRegisterAccessException("No such register: " + regname);
+				//throw new DebuggerRegisterAccessException("No such register: " + regname);
+				//Msg.error(this, "No such register: " + regname);
+				continue;
 			}
 			LldbModelTargetStackFrameRegisterImpl register =
 				(LldbModelTargetStackFrameRegisterImpl) elements.get(regname);
 			byte[] bytes = register.getBytes();
 			result.put(regname, bytes);
 		}
-		ListenerSet<DebuggerModelListener> listeners = getListeners();
-		if (listeners != null) {
-			//if (getName().contains("General")) {
-			listeners.fire.registersUpdated(this, result);
-			//}
-		}
+		//if (getName().contains("General")) {
+		broadcast().registersUpdated(this, result);
+		//}
 		return CompletableFuture.completedFuture(result);
 	}
 
@@ -149,12 +159,17 @@ public class LldbModelTargetStackFrameRegisterBankImpl
 			BigInteger val = new BigInteger(1, ent.getValue());
 			reg.getRegister().SetValueFromCString(val.toString());
 		}
-		getListeners().fire.registersUpdated(getProxy(), values);
+		broadcast().registersUpdated(getProxy(), values);
 		return AsyncUtils.NIL;
 	}
 
 	public Object getContainer() {
 		return container;
+	}
+
+	@Override
+	public Map<String, byte[]> getCachedRegisters() {
+		return LldbModelTargetStackFrameRegisterBank.super.getCachedRegisters();
 	}
 
 }

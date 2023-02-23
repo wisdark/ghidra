@@ -186,16 +186,12 @@ public class GdbModelTargetInferior
 		return impl.gateFuture(inferior.cont());
 	}
 
-
 	@Override
 	public CompletableFuture<Void> step(TargetStepKind kind) {
 		switch (kind) {
 			case SKIP:
 			case EXTENDED:
 				throw new UnsupportedOperationException(kind.name());
-			case ADVANCE: // Why no exec-advance in GDB/MI?
-				// TODO: This doesn't work, since advance requires a parameter
-				return model.gateFuture(inferior.console("advance", CompletesWithRunning.MUST));
 			default:
 				return model.gateFuture(inferior.step(GdbModelTargetThread.convertToGdb(kind)));
 		}
@@ -210,7 +206,7 @@ public class GdbModelTargetInferior
 	public CompletableFuture<Void> interrupt() {
 		return impl.session.interrupt();
 	}
-	
+
 	@Override
 	public CompletableFuture<Void> attach(TargetAttachable attachable) {
 		GdbModelTargetAttachable mine = impl.assertMine(GdbModelTargetAttachable.class, attachable);
@@ -233,7 +229,7 @@ public class GdbModelTargetInferior
 	}
 
 	protected CompletableFuture<Void> inferiorStarted(Long pid) {
-		parent.getListeners().fire.event(parent, null, TargetEventType.PROCESS_CREATED,
+		broadcast().event(parent, null, TargetEventType.PROCESS_CREATED,
 			"Inferior " + inferior.getId() + " started " + inferior.getExecutable() + " pid=" + pid,
 			List.of(this));
 		/*System.err.println("inferiorStarted: realState = " + realState);
@@ -315,28 +311,28 @@ public class GdbModelTargetInferior
 				params.add(loc);
 			}
 			gatherThreads(params, sco.getAffectedThreads());
-			impl.session.getListeners().fire.event(impl.session, targetEventThread,
-				TargetEventType.BREAKPOINT_HIT, bpHit.desc(), params);
+			broadcast().event(impl.session, targetEventThread, TargetEventType.BREAKPOINT_HIT,
+				bpHit.desc(), params);
 		}
 		else if (reason instanceof GdbEndSteppingRangeReason) {
 			List<Object> params = new ArrayList<>();
 			gatherThreads(params, sco.getAffectedThreads());
-			impl.session.getListeners().fire.event(impl.session, targetEventThread,
-				TargetEventType.STEP_COMPLETED, reason.desc(), params);
+			broadcast().event(impl.session, targetEventThread, TargetEventType.STEP_COMPLETED,
+				reason.desc(), params);
 		}
 		else if (reason instanceof GdbSignalReceivedReason) {
 			GdbSignalReceivedReason signal = (GdbSignalReceivedReason) reason;
 			List<Object> params = new ArrayList<>();
 			params.add(signal.getSignalName());
 			gatherThreads(params, sco.getAffectedThreads());
-			impl.session.getListeners().fire.event(impl.session, targetEventThread,
-				TargetEventType.SIGNAL, reason.desc(), params);
+			broadcast().event(impl.session, targetEventThread, TargetEventType.SIGNAL,
+				reason.desc(), params);
 		}
 		else {
 			List<Object> params = new ArrayList<>();
 			gatherThreads(params, sco.getAffectedThreads());
-			impl.session.getListeners().fire.event(impl.session, targetEventThread,
-				TargetEventType.STOPPED, reason.desc(), params);
+			broadcast().event(impl.session, targetEventThread, TargetEventType.STOPPED,
+				reason.desc(), params);
 		}
 	}
 
@@ -445,8 +441,8 @@ public class GdbModelTargetInferior
 					threads.getTargetThread(sco.getAffectedThreads().iterator().next());
 			}
 			if (targetEventThread != null) {
-				impl.session.getListeners().fire.event(impl.session, targetEventThread,
-					TargetEventType.RUNNING, "Running", params);
+				broadcast().event(impl.session, targetEventThread, TargetEventType.RUNNING,
+					"Running", params);
 				invalidateMemoryAndRegisterCaches();
 			}
 		}

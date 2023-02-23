@@ -147,7 +147,7 @@ public class GdbModelTargetSession extends DefaultTargetModelRoot
 			default:
 				throw new AssertionError();
 		}
-		listeners.fire.consoleOutput(this, dbgChannel, out);
+		broadcast().consoleOutput(this, dbgChannel, out);
 	}
 
 	@Override
@@ -264,7 +264,8 @@ public class GdbModelTargetSession extends DefaultTargetModelRoot
 		 * or be used as an example for other implementations.
 		 */
 		if (!PathUtils.isAncestor(this.getPath(), obj.getPath())) {
-			throw new DebuggerIllegalArgumentException("Can only focus a successor of the scope");
+			throw new DebuggerIllegalArgumentException(
+				"Can only activate a successor of the scope");
 		}
 		TargetObject cur = obj;
 		while (cur != null) {

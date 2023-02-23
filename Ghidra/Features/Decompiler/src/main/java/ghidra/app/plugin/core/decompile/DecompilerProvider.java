@@ -21,12 +21,14 @@ import java.math.BigInteger;
 import java.util.*;
 import java.util.concurrent.ConcurrentLinkedQueue;
 
-import javax.swing.*;
+import javax.swing.Icon;
+import javax.swing.JComponent;
 
 import docking.*;
 import docking.action.*;
 import docking.widgets.fieldpanel.support.FieldLocation;
 import docking.widgets.fieldpanel.support.ViewerPosition;
+import generic.theme.GIcon;
 import ghidra.GhidraOptions;
 import ghidra.app.decompiler.*;
 import ghidra.app.decompiler.component.*;
@@ -51,7 +53,6 @@ import ghidra.util.Swing;
 import ghidra.util.bean.field.AnnotatedTextFieldElement;
 import ghidra.util.task.SwingUpdateManager;
 import resources.Icons;
-import resources.ResourceManager;
 import utility.function.Callback;
 
 public class DecompilerProvider extends NavigatableComponentProviderAdapter
@@ -61,8 +62,7 @@ public class DecompilerProvider extends NavigatableComponentProviderAdapter
 	private static final String OPTIONS_TITLE = "Decompiler";
 
 	private static final Icon REFRESH_ICON = Icons.REFRESH_ICON;
-	private static final ImageIcon C_SOURCE_ICON =
-		ResourceManager.loadImage("images/decompileFunction.gif");
+	private static final Icon C_SOURCE_ICON = new GIcon("icon.decompiler.action.provider");
 
 	private DockingAction pcodeGraphAction;
 	private DockingAction astGraphAction;
@@ -111,7 +111,7 @@ public class DecompilerProvider extends NavigatableComponentProviderAdapter
 
 		this.plugin = plugin;
 		this.clipboardProvider = new DecompilerClipboardProvider(plugin, this);
-
+		registerAdjustableFontId(DecompileOptions.DEFAULT_FONT_ID);
 		setConnected(isConnected);
 
 		decompilerOptions = new DecompileOptions();
@@ -160,6 +160,7 @@ public class DecompilerProvider extends NavigatableComponentProviderAdapter
 
 	@Override
 	public void closeComponent() {
+		super.closeComponent();
 		controller.clear();
 		plugin.closeProvider(this);
 	}
@@ -388,7 +389,7 @@ public class DecompilerProvider extends NavigatableComponentProviderAdapter
 
 	/**
 	 * Sets the current program and adds/removes itself as a domainObjectListener
-	 * 
+	 *
 	 * @param newProgram the new program or null to clear out the current program.
 	 */
 	void doSetProgram(Program newProgram) {
@@ -429,7 +430,7 @@ public class DecompilerProvider extends NavigatableComponentProviderAdapter
 	 * sets the current location for this provider. If the provider is not visible, it does not pass
 	 * it on to the controller. When the component is later shown, the current location will then be
 	 * passed to the controller.
-	 * 
+	 *
 	 * @param loc the location to compile and set the cursor.
 	 * @param viewerPosition if non-null the position at which to scroll the view.
 	 */
@@ -914,6 +915,12 @@ public class DecompilerProvider extends NavigatableComponentProviderAdapter
 		ConvertDecAction convertDecAction = new ConvertDecAction(plugin);
 		setGroupInfo(convertDecAction, convertGroup, subGroupPosition++);
 
+		ConvertFloatAction convertFloatAction = new ConvertFloatAction(plugin);
+		setGroupInfo(convertFloatAction, convertGroup, subGroupPosition++);
+
+		ConvertDoubleAction convertDoubleAction = new ConvertDoubleAction(plugin);
+		setGroupInfo(convertDoubleAction, convertGroup, subGroupPosition++);
+
 		ConvertHexAction convertHexAction = new ConvertHexAction(plugin);
 		setGroupInfo(convertHexAction, convertGroup, subGroupPosition++);
 
@@ -1000,6 +1007,8 @@ public class DecompilerProvider extends NavigatableComponentProviderAdapter
 		addLocalAction(removeAllSecondadryHighlightsAction);
 		addLocalAction(convertBinaryAction);
 		addLocalAction(convertDecAction);
+		addLocalAction(convertFloatAction);
+		addLocalAction(convertDoubleAction);
 		addLocalAction(convertHexAction);
 		addLocalAction(convertOctAction);
 		addLocalAction(convertCharAction);

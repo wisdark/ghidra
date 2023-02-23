@@ -75,8 +75,11 @@ public class GdbModelTargetStackFrame
 
 		this.registers = new GdbModelTargetStackFrameRegisterContainer(this);
 
-		changeAttributes(List.of(), List.of(registers), Map.of( //
-			DISPLAY_ATTRIBUTE_NAME, display = computeDisplay(frame)),
+		changeAttributes(List.of(),
+			List.of(
+				registers),
+			Map.of(
+				DISPLAY_ATTRIBUTE_NAME, display = computeDisplay(frame)),
 			"Initialized");
 		setFrame(frame);
 	}
@@ -99,18 +102,18 @@ public class GdbModelTargetStackFrame
 		this.func = frame.getFunction();
 		// TODO: module? "from"
 
-		changeAttributes(List.of(), List.of( //
-			registers //
-		), Map.of( //
-			PC_ATTRIBUTE_NAME, pc, //
-			FUNC_ATTRIBUTE_NAME, func, //
-			DISPLAY_ATTRIBUTE_NAME, display = computeDisplay(frame), //
-			VALUE_ATTRIBUTE_NAME, pc //
-		), "Refreshed");
+		changeAttributes(List.of(),
+			List.of(
+				registers),
+			Map.of(
+				PC_ATTRIBUTE_NAME, pc,
+				FUNC_ATTRIBUTE_NAME, func,
+				DISPLAY_ATTRIBUTE_NAME, display = computeDisplay(frame)),
+			"Refreshed");
 	}
 
 	protected void invalidateRegisterCaches() {
-		listeners.fire.invalidateCacheRequested(this);
+		broadcast().invalidateCacheRequested(this);
 	}
 
 	@Override
