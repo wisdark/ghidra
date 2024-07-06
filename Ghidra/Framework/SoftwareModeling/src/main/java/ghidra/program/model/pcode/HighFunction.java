@@ -40,6 +40,8 @@ import ghidra.util.exception.InvalidInputException;
  */
 public class HighFunction extends PcodeSyntaxTree {
 	public final static String DECOMPILER_TAG_MAP = "decompiler_tags";
+	public final static String OVERRIDE_NAMESPACE_NAME = "override";
+
 	private Function func; // The traditional function object
 	private Language language;
 	private CompilerSpec compilerSpec;
@@ -430,7 +432,12 @@ public class HighFunction extends PcodeSyntaxTree {
 		if (id != 0) {
 			encoder.writeUnsignedInteger(ATTRIB_ID, id);
 		}
-		encoder.writeString(ATTRIB_NAME, func.getName());
+		String funcName = func.getName();
+		encoder.writeString(ATTRIB_NAME, funcName);
+		String altName = getDataTypeManager().getNameTransformer().simplify(funcName);
+		if (!altName.equals(funcName)) {
+			encoder.writeString(ATTRIB_LABEL, altName);
+		}
 		encoder.writeSignedInteger(ATTRIB_SIZE, size);
 		if (func.isInline()) {
 			encoder.writeBool(ATTRIB_INLINE, true);
@@ -444,7 +451,7 @@ public class HighFunction extends PcodeSyntaxTree {
 		else {
 			AddressXML.encode(encoder, entryPoint);		// Address is forced on XML
 		}
-		localSymbols.encodeLocalDb(encoder, namespace);
+		localSymbols.encodeLocalDb(encoder, namespace, getDataTypeManager().getNameTransformer());
 		proto.encodePrototype(encoder, getDataTypeManager());
 		if ((jumpTables != null) && (jumpTables.size() > 0)) {
 			encoder.openElement(ELEM_JUMPTABLELIST);
@@ -480,14 +487,22 @@ public class HighFunction extends PcodeSyntaxTree {
 		}
 	}
 
+	public static boolean isOverrideNamespace(Namespace namespace) {
+		if (!OVERRIDE_NAMESPACE_NAME.equals(namespace.getName())) {
+			return false;
+		}
+		Namespace parent = namespace.getParentNamespace();
+		return (parent instanceof Function);
+	}
+
 	public static Namespace findOverrideSpace(Function func) {
 		SymbolTable symtab = func.getProgram().getSymbolTable();
-		return findNamespace(symtab, func, "override");
+		return findNamespace(symtab, func, OVERRIDE_NAMESPACE_NAME);
 	}
 
 	public static Namespace findCreateOverrideSpace(Function func) {
 		SymbolTable symtab = func.getProgram().getSymbolTable();
-		return findCreateNamespace(symtab, func, "override");
+		return findCreateNamespace(symtab, func, OVERRIDE_NAMESPACE_NAME);
 	}
 
 	public static Namespace findNamespace(SymbolTable symtab, Namespace parent, String name) {
@@ -575,9 +590,11 @@ public class HighFunction extends PcodeSyntaxTree {
 	 * from the root (global) namespace up to the given namespace
 	 * @param encoder is the stream encoder
 	 * @param namespace is the namespace being described
+	 * @param transformer is used to computer the displayed version of each namespace
 	 * @throws IOException for errors in the underlying stream
 	 */
-	static public void encodeNamespace(Encoder encoder, Namespace namespace) throws IOException {
+	static public void encodeNamespace(Encoder encoder, Namespace namespace,
+			NameTransformer transformer) throws IOException {
 		encoder.openElement(ELEM_PARENT);
 		if (namespace != null) {
 			ArrayList<Namespace> arr = new ArrayList<>();
@@ -595,7 +612,12 @@ public class HighFunction extends PcodeSyntaxTree {
 				Namespace curScope = arr.get(i);
 				encoder.openElement(ELEM_VAL);
 				encoder.writeUnsignedInteger(ATTRIB_ID, curScope.getID());
-				encoder.writeString(ATTRIB_CONTENT, curScope.getName());
+				String nm = curScope.getName();
+				String altName = transformer.simplify(nm);
+				if (!nm.equals(altName)) {
+					encoder.writeString(ATTRIB_LABEL, altName);
+				}
+				encoder.writeString(ATTRIB_CONTENT, nm);
 				encoder.closeElement(ELEM_VAL);
 			}
 		}

@@ -15,6 +15,9 @@
  */
 package ghidra.app.plugin.core.byteviewer;
 
+import static ghidra.framework.model.DomainObjectEvent.*;
+import static ghidra.program.util.ProgramEvent.*;
+
 import java.awt.event.*;
 import java.math.BigInteger;
 import java.util.List;
@@ -31,7 +34,7 @@ import ghidra.app.nav.*;
 import ghidra.app.plugin.core.format.*;
 import ghidra.app.services.ClipboardService;
 import ghidra.app.services.ProgramManager;
-import ghidra.app.util.HighlightProvider;
+import ghidra.app.util.ListingHighlightProvider;
 import ghidra.framework.model.*;
 import ghidra.framework.options.SaveState;
 import ghidra.framework.plugintool.PluginEvent;
@@ -39,7 +42,8 @@ import ghidra.framework.plugintool.PluginTool;
 import ghidra.program.model.address.Address;
 import ghidra.program.model.listing.CodeUnit;
 import ghidra.program.model.listing.Program;
-import ghidra.program.util.*;
+import ghidra.program.util.ProgramLocation;
+import ghidra.program.util.ProgramSelection;
 import ghidra.util.HelpLocation;
 import ghidra.util.classfinder.ClassSearcher;
 import ghidra.util.datastruct.WeakDataStructureFactory;
@@ -52,7 +56,7 @@ public class ProgramByteViewerComponentProvider extends ByteViewerComponentProvi
 
 	protected DecoratorPanel decorationComponent;
 	private WeakSet<NavigatableRemovalListener> navigationListeners =
-		WeakDataStructureFactory.createSingleThreadAccessWeakSet();
+		WeakDataStructureFactory.createCopyOnWriteWeakSet();
 
 	private CloneByteViewerAction cloneByteViewerAction;
 
@@ -86,12 +90,16 @@ public class ProgramByteViewerComponentProvider extends ByteViewerComponentProvi
 		}
 
 		decorationComponent = new DecoratorPanel(panel, isConnected);
-		clipboardProvider = new ByteViewerClipboardProvider(this, tool);
+		clipboardProvider = newClipboardProvider();
 		addToTool();
 
 		createProgramActions();
 		updateTitle();
 		registerNavigatable();
+	}
+
+	protected ByteViewerClipboardProvider newClipboardProvider() {
+		return new ByteViewerClipboardProvider(this, tool);
 	}
 
 	public void createProgramActions() {
@@ -132,14 +140,14 @@ public class ProgramByteViewerComponentProvider extends ByteViewerComponentProvi
 
 	@Override
 	public ActionContext getActionContext(MouseEvent event) {
-		return getByteViewerActionContext();
-	}
-
-	ByteViewerActionContext getByteViewerActionContext() {
 		ByteBlockInfo info = panel.getCursorLocation();
 		if (info == null) {
 			return null;
 		}
+		return newByteViewerActionContext();
+	}
+
+	protected ByteViewerActionContext newByteViewerActionContext() {
 		return new ByteViewerActionContext(this);
 	}
 
@@ -170,7 +178,7 @@ public class ProgramByteViewerComponentProvider extends ByteViewerComponentProvi
 		return getCurrentTextSelection();
 	}
 
-	private void setSelection(ProgramSelection selection, boolean notify) {
+	protected void setSelection(ProgramSelection selection, boolean notify) {
 		currentSelection = selection;
 		if (selection == null) {
 			return;
@@ -316,7 +324,7 @@ public class ProgramByteViewerComponentProvider extends ByteViewerComponentProvi
 		if (blocks != null && blockNumber >= 0 && blockNumber < blocks.length) {
 			ByteViewerState view = new ByteViewerState(blockSet,
 				new ByteBlockInfo(blocks[blockNumber], blockOffset, column), vp);
-			panel.returnToView(view);
+			panel.restoreView(view);
 		}
 
 	}
@@ -339,11 +347,11 @@ public class ProgramByteViewerComponentProvider extends ByteViewerComponentProvi
 	@Override
 	public Icon getIcon() {
 		if (isConnected()) {
-			return super.getIcon();
+			return getBaseIcon();
 		}
 
 		if (navigatableIcon == null) {
-			Icon primaryIcon = super.getIcon();
+			Icon primaryIcon = getBaseIcon();
 			navigatableIcon = NavigatableIconFactory.createSnapshotOverlayIcon(primaryIcon);
 		}
 		return navigatableIcon;
@@ -358,13 +366,7 @@ public class ProgramByteViewerComponentProvider extends ByteViewerComponentProvi
 	public boolean isVisible() {
 		return tool.isVisible(this);
 	}
-
-	@Override
-	public void requestFocus() {
-		panel.getCurrentComponent().requestFocus();
-		tool.toFront(this);
-	}
-
+	
 //==================================================================================================
 // End Navigatable interface methods */
 //==================================================================================================
@@ -534,8 +536,7 @@ public class ProgramByteViewerComponentProvider extends ByteViewerComponentProvi
 	public void domainObjectChanged(DomainObjectChangedEvent event) {
 
 		if (blockSet != null) {
-			if (event.containsEvent(DomainObject.DO_OBJECT_SAVED) ||
-				event.containsEvent(DomainObject.DO_DOMAIN_FILE_CHANGED)) {
+			if (event.contains(SAVED, FILE_CHANGED)) {
 				// drop all changes
 
 				blockSet.setByteBlockChangeManager(newByteBlockChangeManager(blockSet, null));
@@ -543,13 +544,8 @@ public class ProgramByteViewerComponentProvider extends ByteViewerComponentProvi
 			}
 		}
 
-		if (event.containsEvent(DomainObject.DO_OBJECT_RESTORED) ||
-			event.containsEvent(ChangeManager.DOCR_MEMORY_BLOCK_CHANGED) ||
-			event.containsEvent(ChangeManager.DOCR_MEMORY_BLOCK_ADDED) ||
-			event.containsEvent(ChangeManager.DOCR_MEMORY_BLOCK_MOVED) ||
-			event.containsEvent(ChangeManager.DOCR_MEMORY_BLOCK_REMOVED) ||
-			event.containsEvent(ChangeManager.DOCR_MEMORY_BLOCKS_JOINED) ||
-			event.containsEvent(ChangeManager.DOCR_MEMORY_BLOCK_SPLIT)) {
+		if (event.contains(RESTORED, MEMORY_BLOCK_CHANGED, MEMORY_BLOCK_ADDED, MEMORY_BLOCK_MOVED,
+			MEMORY_BLOCK_REMOVED, MEMORY_BLOCKS_JOINED, MEMORY_BLOCK_SPLIT)) {
 
 			// call plugin to update data models
 			memoryConfigurationChanged();
@@ -557,16 +553,14 @@ public class ProgramByteViewerComponentProvider extends ByteViewerComponentProvi
 			// changeManager, so get out now.
 		}
 
-		if (event.containsEvent(ChangeManager.DOCR_MEMORY_BYTES_CHANGED) ||
-			event.containsEvent(ChangeManager.DOCR_CODE_ADDED) ||
-			event.containsEvent(ChangeManager.DOCR_MEM_REFERENCE_ADDED)) {
+		if (event.contains(MEMORY_BYTES_CHANGED, CODE_ADDED, REFERENCE_ADDED)) {
 			updateManager.update();
 		}
 	}
 
-	protected ByteBlockChangeManager newByteBlockChangeManager(ProgramByteBlockSet blockSet,
+	protected ByteBlockChangeManager newByteBlockChangeManager(ProgramByteBlockSet blocks,
 			ByteBlockChangeManager bbcm) {
-		return new ByteBlockChangeManager(blockSet, bbcm);
+		return new ByteBlockChangeManager(blocks, bbcm);
 	}
 
 	protected ProgramByteBlockSet newByteBlockSet(ByteBlockChangeManager changeManager) {
@@ -627,7 +621,7 @@ public class ProgramByteViewerComponentProvider extends ByteViewerComponentProvi
 		if (blocks != null && blockNumber >= 0 && blockNumber < blocks.length) {
 			ByteViewerState view = new ByteViewerState(blockSet,
 				new ByteBlockInfo(blocks[blockNumber], blockOffset, column), vp);
-			panel.returnToView(view);
+			panel.restoreView(view);
 		}
 	}
 
@@ -787,12 +781,12 @@ public class ProgramByteViewerComponentProvider extends ByteViewerComponentProvi
 	}
 
 	@Override
-	public void removeHighlightProvider(HighlightProvider highlightProvider, Program p) {
+	public void removeHighlightProvider(ListingHighlightProvider highlightProvider, Program p) {
 		// currently unsupported
 	}
 
 	@Override
-	public void setHighlightProvider(HighlightProvider highlightProvider, Program p) {
+	public void setHighlightProvider(ListingHighlightProvider highlightProvider, Program p) {
 		// currently unsupported
 
 	}

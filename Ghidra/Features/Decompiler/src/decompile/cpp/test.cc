@@ -16,7 +16,7 @@
 #include "test.hh"
 #include "libdecomp.hh"
 
-vector<UnitTest *> UnitTest::tests;
+namespace ghidra {
 
 /// Run all the tests unless a non-empty set of names is passed in.
 /// In which case, only the named tests in the set are run.
@@ -28,7 +28,7 @@ int UnitTest::run(set<string> &testNames)
   int total = 0;
   int passed = 0;
 
-  for(auto &t : UnitTest::tests) {
+  for(auto &t : UnitTest::tests()) {
     if (testNames.size() > 0 && testNames.find(t->name) == testNames.end()) {
       continue;
     }
@@ -95,7 +95,11 @@ int add_exit_code(int current, int add) {
   return ret;
 }
 
+} // End namespace ghidra
+
 int main(int argc, char **argv) {
+  using namespace ghidra;
+
   bool runUnitTests = true;
   bool runDataTests = true;
 

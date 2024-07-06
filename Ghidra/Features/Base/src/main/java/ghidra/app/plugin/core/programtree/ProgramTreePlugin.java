@@ -31,7 +31,6 @@ import ghidra.app.events.TreeSelectionPluginEvent;
 import ghidra.app.plugin.PluginCategoryNames;
 import ghidra.app.plugin.ProgramPlugin;
 import ghidra.app.services.*;
-import ghidra.app.util.PluginConstants;
 import ghidra.framework.model.DomainObject;
 import ghidra.framework.options.*;
 import ghidra.framework.plugintool.*;
@@ -56,7 +55,7 @@ import resources.Icons;
 @PluginInfo(
 	status = PluginStatus.RELEASED,
 	packageName = CorePluginPackage.NAME,
-	category = PluginCategoryNames.TREE,
+	category = PluginCategoryNames.PROGRAM_ORGANIZATION,
 	shortDescription = "Show Program Tree Views",
 	description = "This plugin shows a view for " +
 			" each tree in the program. A tree can be organized into " +
@@ -71,6 +70,7 @@ import resources.Icons;
 public class ProgramTreePlugin extends ProgramPlugin
 		implements ProgramTreeService, OptionsChangeListener {
 
+	private static final String DEFAULT_TREE_NAME = "Program Tree";
 	private static final String PROGRAM_TREE_OPTION_NAME = "Program Tree";
 	private static final String REPLACE_VIEW_OPTION_NAME = "Replace View on Double-click";
 	private static final String REPLACE_VIEW_OPTION_DESCRIPTION = "When toggled on, a " +
@@ -83,7 +83,7 @@ public class ProgramTreePlugin extends ProgramPlugin
 
 	private final static Icon NAVIGATION_ICON = Icons.NAVIGATE_ON_INCOMING_EVENT_ICON;
 
-	private HashMap<String, TreeViewProvider> providerMap;// map of view providers, key is the name
+	private Map<String, TreeViewProvider> providerMap;// map of view providers, key is the name
 	private GoToService goToService;
 	private ViewManagerService viewManagerService;
 	private ProgramTreeActionManager actionManager;
@@ -120,7 +120,7 @@ public class ProgramTreePlugin extends ProgramPlugin
 		createActions();
 
 		// show default provider
-		defaultProvider = addTreeView(PluginConstants.DEFAULT_TREE_NAME);
+		defaultProvider = addTreeView(DEFAULT_TREE_NAME);
 
 		initOptions(tool.getOptions(PROGRAM_TREE_OPTION_NAME));
 
@@ -202,9 +202,7 @@ public class ProgramTreePlugin extends ProgramPlugin
 	 */
 	@Override
 	public void dispose() {
-		Iterator<String> iter = providerMap.keySet().iterator();
-		while (iter.hasNext()) {
-			String treeName = iter.next();
+		for (String treeName : providerMap.keySet()) {
 			TreeViewProvider provider = providerMap.get(treeName);
 			deregisterService(ViewProviderService.class, provider);
 			provider.dispose();
@@ -251,10 +249,8 @@ public class ProgramTreePlugin extends ProgramPlugin
 		viewProvider.writeDataState(saveState);
 
 		saveState.putInt(NUMBER_OF_VIEWS, providerMap.size());
-		Iterator<String> iter = providerMap.keySet().iterator();
 		int idx = 0;
-		while (iter.hasNext()) {
-			String treeName = iter.next();
+		for (String treeName : providerMap.keySet()) {
 			saveState.putString(TREE_NAME + "-" + idx, treeName);
 			TreeViewProvider provider = providerMap.get(treeName);
 			provider.writeDataState(saveState);
@@ -269,7 +265,6 @@ public class ProgramTreePlugin extends ProgramPlugin
 	 */
 	@Override
 	public void readDataState(SaveState saveState) {
-		viewProvider.readDataState(saveState);
 
 		int numberOfViews = saveState.getInt(NUMBER_OF_VIEWS, 0);
 
@@ -279,7 +274,8 @@ public class ProgramTreePlugin extends ProgramPlugin
 		for (int i = 0; i < numberOfViews; i++) {
 			treeNames[i] = saveState.getString(TREE_NAME + "-" + i, null);
 		}
-		ArrayList<TreeViewProvider> providerList = new ArrayList<>();
+
+		List<TreeViewProvider> providerList = new ArrayList<>();
 		for (String element : treeNames) {
 			TreeViewProvider provider = providerMap.get(element);
 			if (provider != null) {
@@ -313,6 +309,30 @@ public class ProgramTreePlugin extends ProgramPlugin
 		}
 
 		selectionToggleAction.setSelected(saveState.getBoolean(TOGGLE_STATE, true));
+
+		restoreTreeViews();
+
+		viewProvider.readDataState(saveState);
+	}
+
+	private void restoreTreeViews() {
+		if (currentProgram == null) {
+			return;
+		}
+
+		//
+		// Update low-level component cache.  We want to maintain the order of the tree views so 
+		// that the UI does not move around on the user.  Use the view names as they are stored in 
+		// the program to provide a consistent order.
+		//		
+		List<TreeViewProvider> list = new ArrayList<>();
+		String[] orderedTreeNames = currentProgram.getListing().getTreeNames();
+		for (String treeName : orderedTreeNames) {
+			TreeViewProvider provider = providerMap.get(treeName);
+			list.add(provider);
+		}
+
+		viewProvider.treeViewsRestored(list);
 	}
 
 	@Override
@@ -355,10 +375,7 @@ public class ProgramTreePlugin extends ProgramPlugin
 	private void removeStaleProviders(ArrayList<TreeViewProvider> providerList) {
 		HashMap<String, TreeViewProvider> map = new HashMap<>(providerMap);
 
-		// remove views from the map that are not in the providerList
-		Iterator<String> iter = map.keySet().iterator();
-		while (iter.hasNext()) {
-			String treeName = iter.next();
+		for (String treeName : map.keySet()) {
 			TreeViewProvider provider = map.get(treeName);
 			if (!providerList.contains(provider)) {
 				deregisterService(ViewProviderService.class, provider);
@@ -546,7 +563,7 @@ public class ProgramTreePlugin extends ProgramPlugin
 			providerMap.put(newName, treeViewProvider);
 
 			if (defaultProvider == treeViewProvider) {
-				defaultProvider = new TreeViewProvider(PluginConstants.DEFAULT_TREE_NAME, this);
+				defaultProvider = new TreeViewProvider(DEFAULT_TREE_NAME, this);
 			}
 			else {
 				reloadTree(treeViewProvider.getProgramDnDTree(), false);
@@ -610,9 +627,7 @@ public class ProgramTreePlugin extends ProgramPlugin
 	 * fragment was moved; update all the view maps.
 	 */
 	void fragmentMoved() {
-		Iterator<String> iter = providerMap.keySet().iterator();
-		while (iter.hasNext()) {
-			String treeName = iter.next();
+		for (String treeName : providerMap.keySet()) {
 			TreeViewProvider provider = providerMap.get(treeName);
 			provider.notifyListeners();
 		}
@@ -757,7 +772,7 @@ public class ProgramTreePlugin extends ProgramPlugin
 	 * @return boolean
 	 */
 	private boolean treeExists(String treeName) {
-		if (currentProgram == null && treeName.equals(PluginConstants.DEFAULT_TREE_NAME)) {
+		if (currentProgram == null && treeName.equals(DEFAULT_TREE_NAME)) {
 			return true;
 		}
 		else if (currentProgram == null) {
@@ -807,7 +822,7 @@ public class ProgramTreePlugin extends ProgramPlugin
 	 * Add the default provider that shows an "empty" program root.
 	 */
 	private void addDefaultProvider() {
-		providerMap.put(PluginConstants.DEFAULT_TREE_NAME, defaultProvider);
+		providerMap.put(DEFAULT_TREE_NAME, defaultProvider);
 		registerServiceProvided(ViewProviderService.class, defaultProvider);
 	}
 
@@ -850,7 +865,7 @@ public class ProgramTreePlugin extends ProgramPlugin
 	private void createDefaultTreeView() {
 		Listing listing = currentProgram.getListing();
 
-		String baseName = PluginConstants.DEFAULT_TREE_NAME;
+		String baseName = DEFAULT_TREE_NAME;
 		int index = 1;
 		String viewName = baseName;
 		boolean done = false;

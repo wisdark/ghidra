@@ -38,6 +38,7 @@ import generic.ID;
 import generic.Unique;
 import ghidra.async.*;
 import ghidra.dbg.*;
+import ghidra.dbg.DebuggerObjectModel.RefreshBehavior;
 import ghidra.dbg.agent.*;
 import ghidra.dbg.attributes.TargetStringList;
 import ghidra.dbg.error.DebuggerIllegalArgumentException;
@@ -337,8 +338,8 @@ public class GadpClientServerTest implements AsyncTestUtils {
 		}
 
 		@Override
-		protected CompletableFuture<Void> requestAttributes(boolean refresh) {
-			if (refresh) {
+		protected CompletableFuture<Void> requestAttributes(RefreshBehavior refresh) {
+			if (refresh.equals(RefreshBehavior.REFRESH_ALWAYS)) {
 				List<String> toRemove = new ArrayList<>();
 				for (String name : attributes.keySet()) {
 					if (PathUtils.isInvocation(name)) {
@@ -438,7 +439,7 @@ public class GadpClientServerTest implements AsyncTestUtils {
 			TestGadpTargetProcess process = new TestGadpTargetProcess(this, pid, base);
 			changeElements(List.of(), List.of(process), Map.of(), "Launched");
 			parent.setFocus(process);
-			return AsyncUtils.NIL;
+			return AsyncUtils.nil();
 		}
 
 		@Override
@@ -458,7 +459,7 @@ public class GadpClientServerTest implements AsyncTestUtils {
 			else {
 				throw new DebuggerIllegalArgumentException("unrecognized option: '" + key + "'");
 			}
-			return AsyncUtils.NIL;
+			return AsyncUtils.nil();
 		}
 
 		public void setBase(int base) {
@@ -513,7 +514,7 @@ public class GadpClientServerTest implements AsyncTestUtils {
 		}
 
 		@Override
-		public CompletableFuture<Void> requestElements(boolean refresh) {
+		public CompletableFuture<Void> requestElements(RefreshBehavior refresh) {
 			setElements(List.of(new TestGadpTargetAvailable(this, 1, "echo"),
 				new TestGadpTargetAvailable(this, 2, "dd")), Map.of(), "Refreshed");
 			return super.requestElements(refresh);
@@ -839,7 +840,7 @@ public class GadpClientServerTest implements AsyncTestUtils {
 			assertEquals(0, invocations.count.get().intValue());
 
 			// Flush the cache
-			waitOn(avail.fetchAttributes(true));
+			waitOn(avail.fetchAttributes(RefreshBehavior.REFRESH_ALWAYS));
 			CompletableFuture<?> future2 = avail.fetchAttribute("greet(World)");
 			waitOn(invocations.count.waitValue(1));
 			TestMethodInvocation invocation2 = invocations.poll();

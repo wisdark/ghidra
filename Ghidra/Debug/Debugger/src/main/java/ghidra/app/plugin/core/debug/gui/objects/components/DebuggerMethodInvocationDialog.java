@@ -15,34 +15,407 @@
  */
 package ghidra.app.plugin.core.debug.gui.objects.components;
 
-import java.awt.BorderLayout;
-import java.awt.FlowLayout;
+import java.awt.*;
 import java.awt.event.ActionEvent;
 import java.beans.*;
+import java.io.File;
+import java.math.BigInteger;
+import java.nio.file.Path;
+import java.nio.file.Paths;
 import java.util.*;
+import java.util.List;
 
 import javax.swing.*;
 import javax.swing.border.EmptyBorder;
+import javax.swing.event.DocumentEvent;
+import javax.swing.event.DocumentListener;
 
 import org.apache.commons.collections4.BidiMap;
 import org.apache.commons.collections4.bidimap.DualLinkedHashBidiMap;
+import org.apache.commons.lang3.ArrayUtils;
 import org.apache.commons.lang3.tuple.MutablePair;
+import org.apache.commons.text.StringEscapeUtils;
 import org.jdom.Element;
 
 import docking.DialogComponentProvider;
+import docking.options.editor.FileChooserEditor;
+import docking.widgets.button.BrowseButton;
+import docking.widgets.filechooser.GhidraFileChooser;
+import docking.widgets.filechooser.GhidraFileChooserMode;
 import ghidra.app.plugin.core.debug.gui.DebuggerResources;
 import ghidra.app.plugin.core.debug.utils.MiscellaneousUtils;
 import ghidra.dbg.target.TargetMethod;
 import ghidra.dbg.target.TargetMethod.ParameterDescription;
 import ghidra.framework.options.SaveState;
-import ghidra.framework.plugintool.AutoConfigState.ConfigStateField;
+import ghidra.framework.plugintool.AutoConfigState.*;
 import ghidra.framework.plugintool.PluginTool;
 import ghidra.util.Msg;
 import ghidra.util.layout.PairLayout;
 
 public class DebuggerMethodInvocationDialog extends DialogComponentProvider
 		implements PropertyChangeListener {
+
+	public static class BigIntEditor extends PropertyEditorSupport {
+		@Override
+		public String getJavaInitializationString() {
+			Object value = getValue();
+			return value == null
+					? "null"
+					: "new BigInteger(\"%s\")".formatted(value);
+		}
+
+		@Override
+		public void setAsText(String text) throws IllegalArgumentException {
+			setValue(text == null
+					? null
+					: new BigInteger(text));
+		}
+	}
+
+	public static class FileChooserPanel extends JPanel {
+		private final static int NUMBER_OF_COLUMNS = 20;
+
+		private final JTextField textField = new JTextField(NUMBER_OF_COLUMNS);
+		private final JButton browseButton = new BrowseButton();
+		private final Runnable propertyChange;
+
+		private GhidraFileChooser fileChooser; // lazy
+
+		public FileChooserPanel(Runnable propertyChange) {
+			this.propertyChange = propertyChange;
+
+			setLayout(new BoxLayout(this, BoxLayout.X_AXIS));
+			add(textField);
+			add(Box.createHorizontalStrut(5));
+			add(browseButton);
+			setBorder(BorderFactory.createEmptyBorder());
+
+			textField.addActionListener(e -> propertyChange.run());
+			textField.getDocument().addDocumentListener(new DocumentListener() {
+				@Override
+				public void removeUpdate(DocumentEvent e) {
+					propertyChange.run();
+				}
+
+				@Override
+				public void insertUpdate(DocumentEvent e) {
+					propertyChange.run();
+				}
+
+				@Override
+				public void changedUpdate(DocumentEvent e) {
+					propertyChange.run();
+				}
+			});
+
+			browseButton.addActionListener(e -> displayFileChooser());
+		}
+
+		public void setValue(File file) {
+			textField.setText(file == null ? "" : file.getAbsolutePath());
+		}
+
+		private void displayFileChooser() {
+			if (fileChooser == null) {
+				fileChooser = createFileChooser();
+			}
+
+			String path = textField.getText().trim();
+			if (!path.isEmpty()) {
+				File f = new File(path);
+				if (f.isDirectory()) {
+					fileChooser.setCurrentDirectory(f);
+				}
+				else {
+					File pf = f.getParentFile();
+					if (pf != null && pf.isDirectory()) {
+						fileChooser.setSelectedFile(f);
+					}
+				}
+			}
+
+			File chosen = fileChooser.getSelectedFile(true);
+			if (chosen != null) {
+				textField.setText(chosen.getAbsolutePath());
+				propertyChange.run();
+			}
+		}
+
+		protected String getTitle() {
+			return "Choose Path";
+		}
+
+		protected GhidraFileChooserMode getSelectionMode() {
+			return GhidraFileChooserMode.FILES_AND_DIRECTORIES;
+		}
+
+		private GhidraFileChooser createFileChooser() {
+			GhidraFileChooser chooser = new GhidraFileChooser(browseButton);
+			chooser.setTitle(getTitle());
+			chooser.setApproveButtonText(getTitle());
+			chooser.setFileSelectionMode(getSelectionMode());
+			// No way for script to specify filter....
+
+			return chooser;
+		}
+	}
+
+	/**
+	 * Compared to {@link FileChooserEditor}, this does not require the user to enter a full path.
+	 * Nor will it resolve file names against the working directory. It's just a text box with a
+	 * file browser assist.
+	 */
+	public static class PathEditor extends PropertyEditorSupport {
+		private final FileChooserPanel panel = newChooserPanel();
+
+		protected FileChooserPanel newChooserPanel() {
+			return new FileChooserPanel(this::firePropertyChange);
+		}
+
+		@Override
+		public String getAsText() {
+			return panel.textField.getText().trim();
+		}
+
+		@Override
+		public Object getValue() {
+			String text = panel.textField.getText().trim();
+			if (text.isEmpty()) {
+				return null;
+			}
+			return Paths.get(text);
+		}
+
+		@Override
+		public void setAsText(String text) throws IllegalArgumentException {
+			if (text == null || text.isBlank()) {
+				panel.textField.setText("");
+			}
+			else {
+				panel.textField.setText(text);
+			}
+		}
+
+		@Override
+		public void setValue(Object value) {
+			if (value == null) {
+				panel.textField.setText("");
+			}
+			else if (value instanceof String s) {
+				panel.textField.setText(s);
+			}
+			else if (value instanceof Path p) {
+				panel.textField.setText(p.toString());
+			}
+			else {
+				throw new IllegalArgumentException("value=" + value);
+			}
+		}
+
+		@Override
+		public boolean supportsCustomEditor() {
+			return true;
+		}
+
+		@Override
+		public Component getCustomEditor() {
+			return panel;
+		}
+	}
+
+	public static class PathIsDirEditor extends PathEditor {
+		@Override
+		protected FileChooserPanel newChooserPanel() {
+			return new FileChooserPanel(this::firePropertyChange) {
+				@Override
+				protected String getTitle() {
+					return "Choose Directory";
+				}
+
+				@Override
+				protected GhidraFileChooserMode getSelectionMode() {
+					return GhidraFileChooserMode.DIRECTORIES_ONLY;
+				}
+			};
+		}
+
+		@Override
+		public Object getValue() {
+			Object value = super.getValue();
+			if (value == null) {
+				return null;
+			}
+			if (value instanceof Path p) {
+				return new PathIsDir(p);
+			}
+			throw new AssertionError();
+		}
+
+		@Override
+		public void setValue(Object value) {
+			if (value instanceof PathIsDir dir) {
+				super.setValue(dir.path());
+			}
+			else {
+				super.setValue(value);
+			}
+		}
+	}
+
+	public static class PathIsFileEditor extends PathEditor {
+		@Override
+		protected FileChooserPanel newChooserPanel() {
+			return new FileChooserPanel(this::firePropertyChange) {
+				@Override
+				protected String getTitle() {
+					return "Choose File";
+				}
+
+				@Override
+				protected GhidraFileChooserMode getSelectionMode() {
+					return GhidraFileChooserMode.FILES_ONLY;
+				}
+			};
+		}
+
+		@Override
+		public Object getValue() {
+			Object value = super.getValue();
+			if (value == null) {
+				return null;
+			}
+			if (value instanceof Path p) {
+				return new PathIsFile(p);
+			}
+			throw new AssertionError();
+		}
+
+		@Override
+		public void setValue(Object value) {
+			if (value instanceof PathIsFile file) {
+				super.setValue(file.path());
+			}
+			else {
+				super.setValue(value);
+			}
+		}
+	}
+
+	static {
+		PropertyEditorManager.registerEditor(BigInteger.class, BigIntEditor.class);
+		PropertyEditorManager.registerEditor(Path.class, PathEditor.class);
+		PropertyEditorManager.registerEditor(PathIsDir.class, PathIsDirEditor.class);
+		PropertyEditorManager.registerEditor(PathIsFile.class, PathIsFileEditor.class);
+	}
+
 	private static final String KEY_MEMORIZED_ARGUMENTS = "memorizedArguments";
+
+	static class ChoicesPropertyEditor implements PropertyEditor {
+		private final List<?> choices;
+		private final String[] tags;
+
+		private final List<PropertyChangeListener> listeners = new ArrayList<>();
+
+		private Object value;
+
+		public ChoicesPropertyEditor(Set<?> choices) {
+			this.choices = List.copyOf(choices);
+			this.tags = choices.stream().map(Objects::toString).toArray(String[]::new);
+		}
+
+		@Override
+		public void setValue(Object value) {
+			if (Objects.equals(value, this.value)) {
+				return;
+			}
+			if (!choices.contains(value)) {
+				throw new IllegalArgumentException("Unsupported value: " + value);
+			}
+			Object oldValue;
+			List<PropertyChangeListener> listeners;
+			synchronized (this.listeners) {
+				oldValue = this.value;
+				this.value = value;
+				if (this.listeners.isEmpty()) {
+					return;
+				}
+				listeners = List.copyOf(this.listeners);
+			}
+			PropertyChangeEvent evt = new PropertyChangeEvent(this, null, oldValue, value);
+			for (PropertyChangeListener l : listeners) {
+				l.propertyChange(evt);
+			}
+		}
+
+		@Override
+		public Object getValue() {
+			return value;
+		}
+
+		@Override
+		public boolean isPaintable() {
+			return false;
+		}
+
+		@Override
+		public void paintValue(Graphics gfx, Rectangle box) {
+			// Not paintable
+		}
+
+		@Override
+		public String getJavaInitializationString() {
+			if (value == null) {
+				return "null";
+			}
+			if (value instanceof String str) {
+				return "\"" + StringEscapeUtils.escapeJava(str) + "\"";
+			}
+			return Objects.toString(value);
+		}
+
+		@Override
+		public String getAsText() {
+			return Objects.toString(value);
+		}
+
+		@Override
+		public void setAsText(String text) throws IllegalArgumentException {
+			int index = ArrayUtils.indexOf(tags, text);
+			if (index < 0) {
+				throw new IllegalArgumentException("Unsupported value: " + text);
+			}
+			setValue(choices.get(index));
+		}
+
+		@Override
+		public String[] getTags() {
+			return tags.clone();
+		}
+
+		@Override
+		public Component getCustomEditor() {
+			return null;
+		}
+
+		@Override
+		public boolean supportsCustomEditor() {
+			return false;
+		}
+
+		@Override
+		public void addPropertyChangeListener(PropertyChangeListener listener) {
+			synchronized (listeners) {
+				listeners.add(listener);
+			}
+		}
+
+		@Override
+		public void removePropertyChangeListener(PropertyChangeListener listener) {
+			synchronized (listeners) {
+				listeners.remove(listener);
+			}
+		}
+	}
 
 	final static class NameTypePair extends MutablePair<String, Class<?>> {
 
@@ -87,6 +460,7 @@ public class DebuggerMethodInvocationDialog extends DialogComponentProvider
 		new DualLinkedHashBidiMap<>();
 
 	private JPanel panel;
+	private JLabel descriptionLabel;
 	private JPanel pairPanel;
 	private PairLayout layout;
 
@@ -95,7 +469,7 @@ public class DebuggerMethodInvocationDialog extends DialogComponentProvider
 	protected boolean resetRequested;
 
 	private final PluginTool tool;
-	private Map<String, ParameterDescription<?>> parameters;
+	Map<String, ParameterDescription<?>> parameters;
 
 	// TODO: Not sure this is the best keying, but I think it works.
 	private Map<NameTypePair, Object> memorized = new HashMap<>();
@@ -103,10 +477,10 @@ public class DebuggerMethodInvocationDialog extends DialogComponentProvider
 
 	public DebuggerMethodInvocationDialog(PluginTool tool, String title, String buttonText,
 			Icon buttonIcon) {
-		super(title, true, false, true, false);
+		super(title, true, true, true, false);
 		this.tool = tool;
 
-		populateComponents(buttonText, buttonIcon, "Reset", DebuggerResources.ICON_REFRESH);
+		populateComponents(buttonText, buttonIcon);
 		setRememberSize(false);
 	}
 
@@ -127,8 +501,7 @@ public class DebuggerMethodInvocationDialog extends DialogComponentProvider
 		populateOptions();
 	}
 
-	private void populateComponents(String buttonText, Icon buttonIcon,
-			String resetText, Icon resetIcon) {
+	private void populateComponents(String buttonText, Icon buttonIcon) {
 		panel = new JPanel(new BorderLayout());
 		panel.setBorder(new EmptyBorder(10, 10, 10, 10));
 
@@ -142,11 +515,15 @@ public class DebuggerMethodInvocationDialog extends DialogComponentProvider
 		panel.add(scrolling, BorderLayout.CENTER);
 		centering.add(pairPanel);
 
+		descriptionLabel = new JLabel();
+		descriptionLabel.setMaximumSize(new Dimension(300, 100));
+		panel.add(descriptionLabel, BorderLayout.NORTH);
+
 		addWorkPanel(panel);
 
 		invokeButton = new JButton(buttonText, buttonIcon);
 		addButton(invokeButton);
-		resetButton = new JButton(resetText, resetIcon);
+		resetButton = new JButton("Reset", DebuggerResources.ICON_REFRESH);
 		addButton(resetButton);
 		addCancelButton();
 
@@ -162,38 +539,49 @@ public class DebuggerMethodInvocationDialog extends DialogComponentProvider
 		close();
 	}
 
-	private void invoke(ActionEvent evt) {
+	void invoke(ActionEvent evt) {
 		this.arguments = TargetMethod.validateArguments(parameters, collectArguments(), false);
 		this.resetRequested = false;
 		close();
 	}
 
-	private void reset(ActionEvent evt) {
+	void reset(ActionEvent evt) {
 		this.arguments = new LinkedHashMap<>();
 		this.resetRequested = true;
 		close();
 	}
 
+	protected PropertyEditor getEditor(ParameterDescription<?> param) {
+		if (!param.choices.isEmpty()) {
+			return new ChoicesPropertyEditor(param.choices);
+		}
+		Class<?> type = param.type;
+		PropertyEditor editor = PropertyEditorManager.findEditor(type);
+		if (editor != null) {
+			return editor;
+		}
+		Msg.warn(this, "No editor for " + type + "? Trying String instead");
+		return PropertyEditorManager.findEditor(String.class);
+	}
+
 	void populateOptions() {
 		pairPanel.removeAll();
-		//layout.setRows(Math.max(1, parameters.size()));
 		paramEditors.clear();
 		for (ParameterDescription<?> param : parameters.values()) {
 			JLabel label = new JLabel(param.display);
 			label.setToolTipText(param.description);
 			pairPanel.add(label);
 
-			Class<?> type = param.type;
-			PropertyEditor editor = PropertyEditorManager.findEditor(type);
-			if (editor == null) {
-				Msg.warn(this, "No editor for " + type + "? Trying String instead");
-				editor = PropertyEditorManager.findEditor(String.class);
-			}
+			PropertyEditor editor = getEditor(param);
 			Object val = computeMemorizedValue(param);
-			editor.setValue(val);
+			if (val == null) {
+				editor.setValue("");
+			}
+			else {
+				editor.setValue(val);
+			}
 			editor.addPropertyChangeListener(this);
 			pairPanel.add(MiscellaneousUtils.getEditorComponent(editor));
-			// TODO: How to handle parameter with choices?
 			paramEditors.put(param, editor);
 		}
 	}
@@ -214,7 +602,6 @@ public class DebuggerMethodInvocationDialog extends DialogComponentProvider
 	}
 
 	public <T> void setMemorizedArgument(String name, Class<T> type, T value) {
-		//name = addContext(name, currentContext);
 		if (value == null) {
 			return;
 		}
@@ -222,8 +609,11 @@ public class DebuggerMethodInvocationDialog extends DialogComponentProvider
 	}
 
 	public <T> T getMemorizedArgument(String name, Class<T> type) {
-		//name = addContext(name, currentContext);
 		return type.cast(memorized.get(new NameTypePair(name, type)));
+	}
+
+	public void forgetMemorizedArguments() {
+		memorized.clear();
 	}
 
 	@Override
@@ -265,4 +655,14 @@ public class DebuggerMethodInvocationDialog extends DialogComponentProvider
 		return resetRequested;
 	}
 
+	public void setDescription(String htmlDescription) {
+		if (htmlDescription == null) {
+			descriptionLabel.setBorder(BorderFactory.createEmptyBorder());
+			descriptionLabel.setText("");
+		}
+		else {
+			descriptionLabel.setBorder(BorderFactory.createEmptyBorder(0, 0, 10, 0));
+			descriptionLabel.setText(htmlDescription);
+		}
+	}
 }

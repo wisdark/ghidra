@@ -28,6 +28,7 @@ import agent.lldb.manager.impl.LldbManagerImpl;
 import agent.lldb.model.iface1.LldbModelTargetFocusScope;
 import agent.lldb.model.iface2.*;
 import ghidra.async.AsyncUtils;
+import ghidra.dbg.DebuggerObjectModel.RefreshBehavior;
 import ghidra.dbg.target.*;
 import ghidra.dbg.target.TargetEventScope.TargetEventType;
 import ghidra.dbg.target.schema.*;
@@ -151,10 +152,10 @@ public class LldbModelTargetProcessImpl extends LldbModelTargetObjectImpl
 		TargetExecutionState targetState = DebugClient.convertState(state);
 		setExecutionState(targetState, "ThreadStateChanged");
 		if (state.equals(StateType.eStateStopped)) {
-			threads.requestElements(true);
+			threads.requestElements(RefreshBehavior.REFRESH_ALWAYS);
 			StopReason stopReason = getManager().getCurrentThread().GetStopReason();
 			if (!stopReason.equals(StopReason.eStopReasonPlanComplete)) {
-				memory.requestElements(true);
+				memory.requestElements(RefreshBehavior.REFRESH_ALWAYS);
 			}
 		}
 	}
@@ -163,7 +164,7 @@ public class LldbModelTargetProcessImpl extends LldbModelTargetObjectImpl
 	public CompletableFuture<Void> launch(List<String> args) {
 		model.gateFuture(getManager().execute(new LldbLaunchProcessCommand(getManager(),
 			getProcess().GetProcessInfo().GetName(), args)));
-		return AsyncUtils.NIL;
+		return AsyncUtils.nil();
 	}
 
 	@Override
@@ -209,7 +210,7 @@ public class LldbModelTargetProcessImpl extends LldbModelTargetObjectImpl
 
 	@Override
 	public CompletableFuture<Void> delete() {
-		return AsyncUtils.NIL;
+		return AsyncUtils.nil();
 		//return model.gateFuture(process.remove());
 	}
 

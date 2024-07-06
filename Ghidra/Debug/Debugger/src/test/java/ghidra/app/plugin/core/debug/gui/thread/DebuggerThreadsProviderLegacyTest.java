@@ -17,26 +17,24 @@ package ghidra.app.plugin.core.debug.gui.thread;
 
 import static org.junit.Assert.*;
 
-import java.awt.event.MouseEvent;
 import java.util.List;
-import java.util.Set;
 
 import org.junit.Before;
 import org.junit.Test;
 import org.junit.experimental.categories.Category;
 
+import db.Transaction;
 import generic.test.category.NightlyCategory;
-import ghidra.app.plugin.core.debug.gui.AbstractGhidraHeadedDebuggerGUITest;
+import ghidra.app.plugin.core.debug.gui.AbstractGhidraHeadedDebuggerTest;
 import ghidra.app.plugin.core.debug.gui.thread.DebuggerLegacyThreadsPanel.ThreadTableColumns;
+import ghidra.app.plugin.core.debug.service.tracemgr.DebuggerTraceManagerServiceTestAccess;
 import ghidra.trace.model.Lifespan;
-import ghidra.trace.model.Trace;
 import ghidra.trace.model.thread.TraceThread;
 import ghidra.trace.model.thread.TraceThreadManager;
 import ghidra.trace.model.time.TraceTimeManager;
-import ghidra.util.database.UndoableTransaction;
 
 @Category(NightlyCategory.class) // this may actually be an @PortSensitive test
-public class DebuggerThreadsProviderLegacyTest extends AbstractGhidraHeadedDebuggerGUITest {
+public class DebuggerThreadsProviderLegacyTest extends AbstractGhidraHeadedDebuggerTest {
 
 	protected DebuggerThreadsPlugin threadsPlugin;
 	protected DebuggerThreadsProvider threadsProvider;
@@ -52,38 +50,12 @@ public class DebuggerThreadsProviderLegacyTest extends AbstractGhidraHeadedDebug
 
 	protected void addThreads() throws Exception {
 		TraceThreadManager manager = tb.trace.getThreadManager();
-		try (UndoableTransaction tid = tb.startTransaction()) {
+		try (Transaction tx = tb.startTransaction()) {
 			thread1 = manager.addThread("Processes[1].Threads[1]", Lifespan.nowOn(0));
 			thread1.setComment("A comment");
 			thread2 = manager.addThread("Processes[1].Threads[2]", Lifespan.span(5, 10));
 			thread2.setComment("Another comment");
 		}
-	}
-
-	/**
-	 * Check that there exist no tabs, and that the tab row is invisible
-	 */
-	protected void assertZeroTabs() {
-		assertEquals(0, threadsProvider.traceTabs.getList().getModel().getSize());
-		assertEquals("Tab row should not be visible", 0,
-			threadsProvider.traceTabs.getVisibleRect().height);
-	}
-
-	/**
-	 * Check that exactly one tab exists, and that the tab row is visible
-	 */
-	protected void assertOneTabPopulated() {
-		assertEquals(1, threadsProvider.traceTabs.getList().getModel().getSize());
-		assertNotEquals("Tab row should be visible", 0,
-			threadsProvider.traceTabs.getVisibleRect().height);
-	}
-
-	protected void assertNoTabSelected() {
-		assertTabSelected(null);
-	}
-
-	protected void assertTabSelected(Trace trace) {
-		assertEquals(trace, threadsProvider.traceTabs.getSelectedItem());
 	}
 
 	protected void assertThreadsEmpty() {
@@ -122,7 +94,6 @@ public class DebuggerThreadsProviderLegacyTest extends AbstractGhidraHeadedDebug
 	}
 
 	protected void assertProviderEmpty() {
-		assertZeroTabs();
 		assertThreadsEmpty();
 	}
 
@@ -133,44 +104,8 @@ public class DebuggerThreadsProviderLegacyTest extends AbstractGhidraHeadedDebug
 	}
 
 	@Test
-	public void testOpenTracePopupatesTab() throws Exception {
-		createAndOpenTrace();
-		waitForSwing();
-
-		assertOneTabPopulated();
-		assertNoTabSelected();
-		assertThreadsEmpty();
-	}
-
-	@Test
-	public void testActivateTraceSelectsTab() throws Exception {
-		createAndOpenTrace();
-		traceManager.activateTrace(tb.trace);
-		waitForSwing();
-
-		assertOneTabPopulated();
-		assertTabSelected(tb.trace);
-
-		traceManager.activateTrace(null);
-		waitForSwing();
-
-		assertOneTabPopulated();
-		assertNoTabSelected();
-	}
-
-	@Test
-	public void testSelectTabActivatesTrace() throws Exception {
-		createAndOpenTrace();
-		waitForSwing();
-		threadsProvider.traceTabs.setSelectedItem(tb.trace);
-		waitForSwing();
-
-		assertEquals(tb.trace, traceManager.getCurrentTrace());
-		assertEquals(tb.trace, threadsProvider.current.getTrace());
-	}
-
-	@Test
 	public void testActivateNoTraceEmptiesProvider() throws Exception {
+		DebuggerTraceManagerServiceTestAccess.setEnsureActiveTrace(traceManager, false);
 		createAndOpenTrace();
 		addThreads();
 		traceManager.activateTrace(tb.trace);
@@ -182,22 +117,6 @@ public class DebuggerThreadsProviderLegacyTest extends AbstractGhidraHeadedDebug
 		waitForSwing();
 
 		assertThreadsEmpty();
-	}
-
-	@Test
-	public void testCurrentTraceClosedUpdatesTabs() throws Exception {
-		createAndOpenTrace();
-		traceManager.activateTrace(tb.trace);
-		waitForSwing();
-
-		assertOneTabPopulated();
-		assertTabSelected(tb.trace);
-
-		traceManager.closeTrace(tb.trace);
-		waitForSwing();
-
-		assertZeroTabs();
-		assertNoTabSelected();
 	}
 
 	@Test
@@ -213,25 +132,6 @@ public class DebuggerThreadsProviderLegacyTest extends AbstractGhidraHeadedDebug
 		waitForSwing();
 
 		assertThreadsEmpty();
-	}
-
-	@Test
-	public void testCloseTraceTabPopupMenuItem() throws Exception {
-		createAndOpenTrace();
-		waitForSwing();
-
-		assertOneTabPopulated(); // pre-check
-		clickListItem(threadsProvider.traceTabs.getList(), 0, MouseEvent.BUTTON3);
-		waitForSwing();
-		Set<String> expected = Set.of("Close " + tb.trace.getName());
-		assertMenu(expected, expected);
-
-		clickSubMenuItemByText("Close " + tb.trace.getName());
-		waitForSwing();
-
-		waitForPass(() -> {
-			assertEquals(Set.of(), traceManager.getOpenTraces());
-		});
 	}
 
 	@Test
@@ -267,7 +167,7 @@ public class DebuggerThreadsProviderLegacyTest extends AbstractGhidraHeadedDebug
 
 		assertEquals(1, threadsProvider.legacyPanel.spanRenderer.getFullRange().max().longValue());
 
-		try (UndoableTransaction tid = tb.startTransaction()) {
+		try (Transaction tx = tb.startTransaction()) {
 			manager.getSnapshot(10, true);
 		}
 		waitForSwing();
@@ -284,7 +184,7 @@ public class DebuggerThreadsProviderLegacyTest extends AbstractGhidraHeadedDebug
 		traceManager.activateTrace(tb.trace);
 		waitForSwing();
 
-		try (UndoableTransaction tid = tb.startTransaction()) {
+		try (Transaction tx = tb.startTransaction()) {
 			thread1.setDestructionSnap(15);
 		}
 		waitForSwing();
@@ -304,7 +204,7 @@ public class DebuggerThreadsProviderLegacyTest extends AbstractGhidraHeadedDebug
 
 		assertEquals(2, threadsProvider.legacyPanel.threadTableModel.getModelData().size());
 
-		try (UndoableTransaction tid = tb.startTransaction()) {
+		try (Transaction tx = tb.startTransaction()) {
 			thread2.delete();
 		}
 		waitForSwing();

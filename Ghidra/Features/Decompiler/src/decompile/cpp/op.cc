@@ -16,6 +16,8 @@
 #include "op.hh"
 #include "funcdata.hh"
 
+namespace ghidra {
+
 ElementId ELEM_IOP = ElementId("iop",113);
 ElementId ELEM_UNIMPL = ElementId("unimpl",114);
 
@@ -29,7 +31,7 @@ const string IopSpace::NAME = "iop";
 /// \param t is the associated processor translator
 /// \param ind is the associated index
 IopSpace::IopSpace(AddrSpaceManager *m,const Translate *t,int4 ind)
-  : AddrSpace(m,t,IPTR_IOP,NAME,sizeof(void *),1,ind,0,1)
+  : AddrSpace(m,t,IPTR_IOP,NAME,false,sizeof(void *),1,ind,0,1,1)
 {
   clearFlags(heritaged|does_deadcode|big_endian);
   if (HOST_ENDIAN==1)		// Endianness always set to host
@@ -54,12 +56,6 @@ void IopSpace::printRaw(ostream &s,uintb offset) const
     bl = (BlockBasic *)bs->getOut(0);
   s << "code_" << bl->getStart().getShortcut();
   bl->getStart().printRaw(s);
-}
-
-void IopSpace::saveXml(ostream &s) const
-
-{
-  throw LowlevelError("Should never encode iop space to stream");
 }
 
 void IopSpace::decode(Decoder &decoder)
@@ -119,7 +115,6 @@ int4 PcodeOp::getRepeatSlot(const Varnode *vn,int4 firstSlot,list<PcodeOp *>::co
 bool PcodeOp::isCollapsible(void) const
 
 {
-  if (code() == CPUI_COPY) return false;
   if ((flags & PcodeOp::nocollapse)!=0) return false;
   if (!isAssignment()) return false;
   if (inrefs.size()==0) return false;
@@ -645,6 +640,10 @@ uintb PcodeOp::getNZMaskLocal(bool cliploop) const
     resmask = coveringmask((uintb)sz1);
     resmask &= fullmask;
     break;
+  case CPUI_LZCOUNT:
+    resmask = coveringmask(getIn(0)->getSize() * 8);
+    resmask &= fullmask;
+    break;
   case CPUI_SUBPIECE:
     resmask = getIn(0)->getNZMask();
     sz1 = (int4)getIn(1)->getOffset();
@@ -757,9 +756,9 @@ int4 PcodeOp::compareOrder(const PcodeOp *bop) const
 /// whether a Varnode is a leaf of this tree.
 /// \param rootVn is the given root of the CONCAT tree
 /// \param vn is the Varnode to test as a leaf
-/// \param typeOffset is byte offset of the test Varnode within fully concatenated value
+/// \param relOffset is byte offset of the test Varnode within fully concatenated value (rooted at \b rootVn)
 /// \return \b true is the test Varnode is a leaf of the tree
-bool PieceNode::isLeaf(Varnode *rootVn,Varnode *vn,int4 typeOffset)
+bool PieceNode::isLeaf(Varnode *rootVn,Varnode *vn,int4 relOffset)
 
 {
   if (vn->isMapped() && rootVn->getSymbolEntry() != vn->getSymbolEntry()) {
@@ -771,7 +770,7 @@ bool PieceNode::isLeaf(Varnode *rootVn,Varnode *vn,int4 typeOffset)
   PcodeOp *op = vn->loneDescend();
   if (op == (PcodeOp *)0) return true;
   if (vn->isAddrTied()) {
-    Address addr = rootVn->getAddr() + typeOffset;
+    Address addr = rootVn->getAddr() + relOffset;
     if (vn->getAddr() != addr) return true;
   }
   return false;
@@ -796,6 +795,7 @@ Varnode *PieceNode::findRoot(Varnode *vn)
       Address addr = op->getOut()->getAddr();
       if (addr.getSpace()->isBigEndian() == (slot == 1))
 	addr = addr + op->getIn(1-slot)->getSize();
+      addr.renormalize(vn->getSize());		// Allow for possible join address
       if (addr == vn->getAddr()) {
 	if (pieceOp != (PcodeOp *)0) {		// If there is more than one valid PIECE
 	  if (op->compareOrder(pieceOp))	// Attach this to earliest one
@@ -820,17 +820,18 @@ Varnode *PieceNode::findRoot(Varnode *vn)
 /// \param stack holds the markup for each node of the tree
 /// \param rootVn is the given root of the tree
 /// \param op is the current PIECE op to explore as part of the tree
-/// \param baseOffset is the offset associated with the output of the current PIECE op
-void PieceNode::gatherPieces(vector<PieceNode> &stack,Varnode *rootVn,PcodeOp *op,int4 baseOffset)
+/// \param baseOffset is the offset associated with the output of the current PIECE op wihtin the data-type
+/// \param rootOffset is the offset of the \b rootVn within the data-type
+void PieceNode::gatherPieces(vector<PieceNode> &stack,Varnode *rootVn,PcodeOp *op,int4 baseOffset,int4 rootOffset)
 
 {
   for(int4 i=0;i<2;++i) {
     Varnode *vn = op->getIn(i);
     int4 offset = (rootVn->getSpace()->isBigEndian() == (i==1)) ? baseOffset + op->getIn(1-i)->getSize() : baseOffset;
-    bool res = isLeaf(rootVn,vn,offset);
+    bool res = isLeaf(rootVn,vn,offset-rootOffset);
     stack.emplace_back(op,i,offset,res);
     if (!res)
-      gatherPieces(stack,rootVn,vn->getDef(),offset);
+      gatherPieces(stack,rootVn,vn->getDef(),offset,rootOffset);
   }
 }
 
@@ -1325,3 +1326,5 @@ bool functionalDifference(Varnode *vn1,Varnode *vn2,int4 depth)
       return true;
   return false;
 }
+
+} // End namespace ghidra

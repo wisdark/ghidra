@@ -17,8 +17,7 @@ package agent.dbgeng.model.iface2;
 
 import java.util.concurrent.CompletableFuture;
 
-import agent.dbgeng.dbgeng.DebugSystemObjects;
-import agent.dbgeng.dbgeng.DebugThreadId;
+import agent.dbgeng.dbgeng.*;
 import agent.dbgeng.manager.*;
 import agent.dbgeng.manager.impl.*;
 import agent.dbgeng.model.iface1.*;
@@ -42,16 +41,17 @@ public interface DbgModelTargetThread extends //
 
 	public default DbgThread getThread(boolean fire) {
 		DbgManagerImpl manager = getManager();
-		DebugSystemObjects so = manager.getSystemObjects();
 		try {
+			DbgModelTargetProcess parentProcess = getParentProcess();
+			DbgProcessImpl process = parentProcess == null ? null : (DbgProcessImpl) parentProcess.getProcess();
 			String index = PathUtils.parseIndex(getName());
-			int tid = Integer.decode(index);
-			DebugThreadId id = so.getThreadIdBySystemId(tid);
+			Long tid = Long.decode(index);
+			
+			DebugSystemObjects so = manager.getSystemObjects();
+			DebugThreadId id = so.getThreadIdBySystemId(tid.intValue());
 			if (id == null) {
 				id = so.getCurrentThreadId();
 			}
-			DbgModelTargetProcess parentProcess = getParentProcess();
-			DbgProcessImpl process = (DbgProcessImpl) parentProcess.getProcess();
 			DbgThreadImpl thread = manager.getThreadComputeIfAbsent(id, process, tid, fire);
 			return thread;
 		}

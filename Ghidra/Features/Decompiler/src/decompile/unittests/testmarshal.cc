@@ -16,6 +16,8 @@
 #include "translate.hh"
 #include "test.hh"
 
+namespace ghidra {
+
 class TestAddrSpaceManager : public AddrSpaceManager {
 public:
   TestAddrSpaceManager(Translate *t);
@@ -47,7 +49,7 @@ static MarshalTestEnvironment theEnviron;
 TestAddrSpaceManager::TestAddrSpaceManager(Translate *t)
   : AddrSpaceManager()
 {
-  insertSpace(new AddrSpace(this,t,IPTR_PROCESSOR,"ram",8,1,3,AddrSpace::hasphysical,1));
+  insertSpace(new AddrSpace(this,t,IPTR_PROCESSOR,"ram",t->isBigEndian(),8,1,3,AddrSpace::hasphysical,1,1));
 }
 
 MarshalTestEnvironment::MarshalTestEnvironment(void)
@@ -550,3 +552,5 @@ TEST(marshal_bufferpad) {
   ASSERT_EQUALS(nextel,0);
   decoder.closeElement(el);
 }
+
+} // End namespace ghidra

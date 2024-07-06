@@ -15,10 +15,12 @@
  */
 /// \file op.hh
 /// \brief The PcodeOp and PcodeOpBank classes
-#ifndef __CPUI_OP__
-#define __CPUI_OP__
+#ifndef __OP_HH__
+#define __OP_HH__
 
 #include "typeop.hh"
+
+namespace ghidra {
 
 extern ElementId ELEM_IOP;		///< Marshaling element \<iop>
 extern ElementId ELEM_UNIMPL;		///< Marshaling element \<unimpl>
@@ -38,7 +40,6 @@ public:
   virtual void encodeAttributes(Encoder &encoder,uintb offset) const { encoder.writeString(ATTRIB_SPACE, "iop"); }
   virtual void encodeAttributes(Encoder &encoder,uintb offset,int4 size) const { encoder.writeString(ATTRIB_SPACE, "iop"); }
   virtual void printRaw(ostream &s,uintb offset) const;
-  virtual void saveXml(ostream &s) const;
   virtual void decode(Decoder &decoder);
   static const string NAME;			///< Reserved name for the iop space
 };
@@ -112,7 +113,9 @@ public:
     is_cpool_transformed = 0x20, ///< Have we checked for cpool transforms
     stop_type_propagation = 0x40,	///< Stop data-type propagation into output from descendants
     hold_output = 0x80,		///< Output varnode (of call) should not be removed if it is unread
-    concat_root = 0x100		///< Output of \b this is root of a CONCAT tree
+    concat_root = 0x100,	///< Output of \b this is root of a CONCAT tree
+    no_indirect_collapse = 0x200,	///< Do not collapse \b this INDIRECT (via RuleIndirectCollapse)
+    store_unmapped = 0x400	///< If STORE collapses to a stack Varnode, force it to be unmapped
   };
 private:
   TypeOp *opcode;		///< Pointer to class providing behavioral details of the operation
@@ -217,6 +220,10 @@ public:
   void setPartialRoot(void) { addlflags |= concat_root; }	///< Mark \b this as root of CONCAT tree
   bool stopsCopyPropagation(void) const { return ((flags&no_copy_propagation)!=0); }	///< Does \b this allow COPY propagation
   void setStopCopyPropagation(void) { flags |= no_copy_propagation; }	///< Stop COPY propagation through inputs
+  bool noIndirectCollapse(void) const { return ((addlflags & no_indirect_collapse)!=0); }	///< Check if INDIRECT collapse is possible
+  void setNoIndirectCollapse(void) { addlflags |= no_indirect_collapse; }	///< Prevent collapse of INDIRECT
+  bool isStoreUnmapped(void) const { return ((addlflags & store_unmapped)!=0); }	///< Is STORE location supposed to be unmapped
+  void setStoreUnmapped(void) const { addlflags |= store_unmapped; }	///< Mark that STORE location should be unmapped
   /// \brief Return \b true if this LOADs or STOREs from a dynamic \e spacebase pointer
   bool usesSpacebasePtr(void) const { return ((flags&PcodeOp::spacebase_ptr)!=0); }
   uintm getCseHash(void) const;	///< Return hash indicating possibility of common subexpression elimination
@@ -253,6 +260,7 @@ struct PcodeOpNode {
   PcodeOpNode(void) { op = (PcodeOp *)0; slot = 0; }	///< Unused constructor
   PcodeOpNode(PcodeOp *o,int4 s) { op = o; slot = s; }	///< Constructor
   bool operator<(const PcodeOpNode &op2) const;		///< Simple comparator for putting edges in a sorted container
+  static bool compareByHigh(const PcodeOpNode &a,const PcodeOpNode &b);	///< Compare Varnodes by their HighVariable
 };
 
 /// \brief A node in a tree structure of CPUI_PIECE operations
@@ -276,7 +284,7 @@ public:
   Varnode *getVarnode(void) const { return pieceOp->getIn(slot); }	///< Get the Varnode representing \b this piece
   static bool isLeaf(Varnode *rootVn,Varnode *vn,int4 typeOffset);
   static Varnode *findRoot(Varnode *vn);
-  static void gatherPieces(vector<PieceNode> &stack,Varnode *rootVn,PcodeOp *op,int4 baseOffset);
+  static void gatherPieces(vector<PieceNode> &stack,Varnode *rootVn,PcodeOp *op,int4 baseOffset,int4 rootOffset);
 };
 
 /// A map from sequence number (SeqNum) to PcodeOp
@@ -371,4 +379,15 @@ inline bool PcodeOpNode::operator<(const PcodeOpNode &op2) const
   return false;
 }
 
+/// Allow a sorting that groups together input Varnodes with the same HighVariable
+/// \param a is the first Varnode to compare
+/// \param b is the second Varnode to compare
+/// \return true is \b a should come before \b b
+inline bool PcodeOpNode::compareByHigh(const PcodeOpNode &a, const PcodeOpNode &b)
+
+{
+  return a.op->getIn(a.slot)->getHigh() < b.op->getIn(b.slot)->getHigh();
+}
+
+} // End namespace ghidra
 #endif

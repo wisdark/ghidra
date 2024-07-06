@@ -26,12 +26,16 @@
 ///             ASSERT(0.0 < 1.0);
 ///         }
 ///
+#ifndef __TEST_HH__
+#define __TEST_HH__
 
 #include <vector>
 #include <set>
 #include <string>
 #include <sstream>
 #include <iostream>
+
+namespace ghidra {
 
 using std::vector;
 using std::set;
@@ -49,7 +53,6 @@ typedef void (*testfunc_t)();	///< A unit-test function
 /// The static run() method calls all the function pointers of all instantiated
 /// objects.
 struct UnitTest {
-  static vector<UnitTest *> tests;		///< The collection of test objects
   string name;					///< Name of the test
   testfunc_t func;				///< Call-back function executing the test
 
@@ -60,12 +63,19 @@ struct UnitTest {
   UnitTest(const string &name,testfunc_t func) :
       name(name), func(func)
   {
-    tests.push_back(this);
+    tests().push_back(this);
+  }
+
+  /// \brief The collection of test objects
+  static vector<UnitTest *> & tests() {
+    static vector<UnitTest *> tests;
+    return tests;
   }
 
   static int run(set<string> &testNames);	///< Run all the instantiated tests
 };
 
+} // End namespace ghidra
 
 /// \brief Main unit test macro
 #define TEST(testname)                                                                                                 \
@@ -101,3 +111,5 @@ struct UnitTest {
                   << " != " << ssb.str() << "\"." << endl;                                                          \
         throw 0;                                                                                                       \
     }
+
+#endif

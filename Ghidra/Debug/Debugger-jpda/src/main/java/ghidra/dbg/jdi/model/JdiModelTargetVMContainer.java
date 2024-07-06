@@ -24,6 +24,7 @@ import com.sun.jdi.VirtualMachine;
 import com.sun.jdi.event.*;
 
 import ghidra.async.AsyncUtils;
+import ghidra.dbg.DebuggerObjectModel.RefreshBehavior;
 import ghidra.dbg.jdi.manager.JdiCause;
 import ghidra.dbg.jdi.manager.JdiEventsListenerAdapter;
 import ghidra.dbg.target.TargetEventScope.TargetEventType;
@@ -151,10 +152,10 @@ public class JdiModelTargetVMContainer extends JdiModelTargetObjectImpl
 	}
 
 	@Override
-	public CompletableFuture<Void> requestElements(boolean refresh) {
-		if (!refresh) {
+	public CompletableFuture<Void> requestElements(RefreshBehavior refresh) {
+		if (!refresh.equals(RefreshBehavior.REFRESH_ALWAYS)) {
 			updateUsingVMs(impl.getManager().getKnownVMs());
-			return AsyncUtils.NIL;
+			return AsyncUtils.nil();
 		}
 		return impl.getManager().listVMs().thenAccept(this::updateUsingVMs);
 	}

@@ -39,16 +39,17 @@ public class ThemeEditorDialog extends DialogComponentProvider {
 
 	private JButton saveButton;
 	private GhidraComboBox<LafType> combo;
-	private ItemListener comboListener = this::themeComboChanged;
+	private ItemListener comboListener = this::lafTypeComboChanged;
 	private ThemeListener listener = new DialogThemeListener();
 	private JTabbedPane tabbedPane;
 
 	private ThemeColorTable colorTable;
 	private ThemeFontTable fontTable;
 	private ThemeIconTable iconTable;
+	private ThemeColorTree colorTree;
+	private ThemeColorTable paletteTable;
 
 	private ThemeManager themeManager;
-
 	private GThemeValuesCache valuesCache;
 
 	public ThemeEditorDialog(ThemeManager themeManager) {
@@ -89,7 +90,8 @@ public class ThemeEditorDialog extends DialogComponentProvider {
 		DockingAction reloadDefaultsAction = new ActionBuilder("Restore Theme Values", getTitle())
 				.toolBarIcon(new GIcon("icon.refresh"))
 				.toolBarGroup("B")
-				.description("Reloads default values and restores theme to its original values.")
+				.description("Reloads default values from the filesystem and restores the " +
+					"original theme values.")
 				.helpLocation(new HelpLocation("Theming", "Reload_Theme"))
 				.onAction(e -> restoreCallback())
 				.build();
@@ -104,6 +106,22 @@ public class ThemeEditorDialog extends DialogComponentProvider {
 					.onAction(c -> c.getThemeValue().installValue(themeManager))
 					.build();
 		addAction(resetValueAction);
+
+		DockingAction showSystemValuesAction =
+			new ActionBuilder("Toggle Show System Values", getTitle())
+					.popupMenuPath("Toggle Show System Values")
+					.withContext(ThemeTableContext.class)
+					.popupWhen(c -> true)
+					.helpLocation(new HelpLocation("Theming", "Toggle_Show_System_Values"))
+					.onAction(context -> toggleSystemValues(context))
+					.build();
+		addAction(showSystemValuesAction);
+	}
+
+	private void toggleSystemValues(ThemeTableContext<?> context) {
+		ThemeTable themeTable = context.getThemeTable();
+		boolean isShowing = themeTable.isShowingSystemValues();
+		themeTable.setShowSystemValues(!isShowing);
 	}
 
 	private void adjustFonts(int amount) {
@@ -148,35 +166,84 @@ public class ThemeEditorDialog extends DialogComponentProvider {
 	}
 
 	private void reset() {
+		colorTree.rebuild();
 		colorTable.reloadAll();
+		paletteTable.reloadAll();
 		fontTable.reloadAll();
 		iconTable.reloadAll();
 		updateButtons();
 	}
 
-	private void themeComboChanged(ItemEvent e) {
+	private void resetSelectedLookAndFeel() {
+		Swing.runLater(() -> {
+
+			LafType lafType = themeManager.getLookAndFeelType();
+			Object currentItem = combo.getSelectedItem();
+			if (lafType == currentItem) {
+				return;
+			}
+
+			try {
+				combo.removeItemListener(comboListener);
+				combo.setSelectedItem(lafType);
+			}
+			finally {
+				combo.addItemListener(comboListener);
+			}
+		});
+	}
+
+	private void lafTypeComboChanged(ItemEvent e) {
 
 		if (e.getStateChange() != ItemEvent.SELECTED) {
 			return;
 		}
 
 		LafType lafType = (LafType) e.getItem();
-		Swing.runLater(() -> {
+		LafType currentLafType = themeManager.getLookAndFeelType();
+		if (currentLafType == lafType) {
+			return;
+		}
 
-			themeManager.setLookAndFeel(lafType, lafType.usesDarkDefaults());
-			if (lafType == LafType.GTK) {
-				setStatusText(
-					"Warning - Themes using the GTK LookAndFeel do not support changing java " +
-						"component colors, fonts or icons.",
-					MessageType.ERROR);
-			}
-			else {
-				setStatusText("");
-			}
-			colorTable.reloadAll();
-			fontTable.reloadAll();
-			iconTable.reloadAll();
-		});
+		if (!themeManager.hasThemeValueChanges()) {
+			// This allows the user to toggle the them lafType repeatedly without having to save, as
+			// long as they have not changed any other theme values.
+			setLookAndFeel(lafType);
+			return;
+		}
+
+		//@formatter:off
+		int result = OptionDialog.showOptionDialog(null, "Discard Changes?",
+			"Changing the Look and Feel type will cause you to lose your changes.\n" +
+			"If you would like to keep your changes, cancel this dialog and then save the theme\n" +
+			"Would you like to continue?",
+			"Lose Changes");
+		//@formatter:on
+		if (result == OptionDialog.CANCEL_OPTION) {
+			resetSelectedLookAndFeel();
+			return;
+		}
+
+		setLookAndFeel(lafType);
+	}
+
+	private void setLookAndFeel(LafType lafType) {
+
+		themeManager.setLookAndFeel(lafType, lafType.usesDarkDefaults());
+		if (lafType == LafType.GTK) {
+			setStatusText(
+				"Warning - Themes using the GTK LookAndFeel do not support changing java " +
+					"component colors, fonts or icons.",
+				MessageType.WARNING);
+		}
+		else {
+			setStatusText("");
+		}
+		colorTree.rebuild();
+		colorTable.reloadAll();
+		paletteTable.reloadAll();
+		fontTable.reloadAll();
+		iconTable.reloadAll();
 	}
 
 	private void updateButtons() {
@@ -204,7 +271,6 @@ public class ThemeEditorDialog extends DialogComponentProvider {
 	private Component buildThemeCombo() {
 		JPanel panel = new JPanel();
 		List<LafType> lafs = getSupportedLookAndFeels();
-
 		combo = new GhidraComboBox<>(lafs);
 		combo.setSelectedItem(themeManager.getActiveTheme().getLookAndFeelType());
 		combo.addItemListener(comboListener);
@@ -217,7 +283,8 @@ public class ThemeEditorDialog extends DialogComponentProvider {
 
 	private List<LafType> getSupportedLookAndFeels() {
 		LafType[] lafTypes = LafType.values();
-		Comparator<LafType> comparator = (a, b) -> a.getName().compareTo(b.getName());
+		Comparator<LafType> comparator =
+			(a, b) -> a.getDisplayString().compareTo(b.getDisplayString());
 		return Arrays.stream(lafTypes).filter(laf -> laf.isSupported()).sorted(comparator).toList();
 	}
 
@@ -229,10 +296,14 @@ public class ThemeEditorDialog extends DialogComponentProvider {
 		colorTable = new ThemeColorTable(themeManager, valuesCache);
 		iconTable = new ThemeIconTable(themeManager, valuesCache);
 		fontTable = new ThemeFontTable(themeManager, valuesCache);
+		colorTree = new ThemeColorTree(themeManager);
+		paletteTable = new ThemeColorPaletteTable(themeManager, valuesCache);
 
 		tabbedPane.add("Colors", colorTable);
 		tabbedPane.add("Fonts", fontTable);
 		tabbedPane.add("Icons", iconTable);
+		tabbedPane.add("Color Tree", colorTree);
+		tabbedPane.add("Palette", paletteTable);
 
 		return tabbedPane;
 	}
@@ -277,6 +348,10 @@ public class ThemeEditorDialog extends DialogComponentProvider {
 		return contextProvider.getActionContext(event);
 	}
 
+//=================================================================================================
+// Inner Classes
+//=================================================================================================	
+
 	private class DialogThemeListener implements ThemeListener {
 		@Override
 		public void themeChanged(ThemeEvent event) {
@@ -287,6 +362,8 @@ public class ThemeEditorDialog extends DialogComponentProvider {
 			}
 			if (event.hasAnyColorChanged()) {
 				colorTable.reloadCurrent();
+				colorTree.rebuild();
+				paletteTable.reloadCurrent();
 			}
 			if (event.hasAnyFontChanged()) {
 				fontTable.reloadCurrent();
@@ -294,7 +371,9 @@ public class ThemeEditorDialog extends DialogComponentProvider {
 			if (event.hasAnyIconChanged()) {
 				iconTable.reloadCurrent();
 			}
+
 			updateButtons();
+			resetSelectedLookAndFeel();
 		}
 	}
 }

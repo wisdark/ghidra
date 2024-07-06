@@ -35,8 +35,6 @@ import ghidra.app.plugin.core.debug.*;
 import ghidra.app.plugin.core.debug.event.TraceClosedPluginEvent;
 import ghidra.app.plugin.core.debug.gui.DebuggerResources.*;
 import ghidra.app.plugin.core.debug.gui.action.DebuggerTrackLocationTrait;
-import ghidra.app.plugin.core.debug.gui.action.LocationTrackingSpec;
-import ghidra.app.plugin.core.debug.gui.listing.MultiBlendedListingBackgroundColorModel;
 import ghidra.app.plugin.core.debug.gui.time.DebuggerTimeSelectionDialog;
 import ghidra.app.plugin.core.debug.utils.BackgroundUtils.PluginToolExecutorService;
 import ghidra.app.plugin.core.debug.utils.BackgroundUtils.PluginToolExecutorService.TaskOpt;
@@ -44,6 +42,9 @@ import ghidra.app.services.*;
 import ghidra.app.services.DebuggerListingService.LocationTrackingSpecChangeListener;
 import ghidra.app.util.viewer.listingpanel.ListingPanel;
 import ghidra.async.AsyncUtils;
+import ghidra.debug.api.action.LocationTrackingSpec;
+import ghidra.debug.api.listing.MultiBlendedListingBackgroundColorModel;
+import ghidra.debug.api.tracemgr.DebuggerCoordinates;
 import ghidra.framework.plugintool.*;
 import ghidra.framework.plugintool.annotation.AutoServiceConsumed;
 import ghidra.framework.plugintool.util.PluginStatus;
@@ -57,23 +58,14 @@ import ghidra.trace.model.program.TraceProgramView;
 import ghidra.trace.model.time.schedule.TraceSchedule;
 import ghidra.util.Msg;
 
-@PluginInfo(
-	shortDescription = "Compare memory state between times in a trace",
-	description = "Provides a side-by-side diff view between snapshots (points in time) in a " +
-		"trace. The comparison is limited to raw bytes.",
-	category = PluginCategoryNames.DEBUGGER,
-	packageName = DebuggerPluginPackage.NAME,
-	status = PluginStatus.RELEASED,
-	eventsConsumed = {
+@PluginInfo(shortDescription = "Compare memory state between times in a trace", description = "Provides a side-by-side diff view between snapshots (points in time) in a " +
+	"trace. The comparison is limited to raw bytes.", category = PluginCategoryNames.DEBUGGER, packageName = DebuggerPluginPackage.NAME, status = PluginStatus.RELEASED, eventsConsumed = {
 		TraceClosedPluginEvent.class,
-	},
-	eventsProduced = {},
-	servicesRequired = {
+	}, eventsProduced = {}, servicesRequired = {
 		DebuggerListingService.class,
-	},
-	servicesProvided = {})
+	}, servicesProvided = {})
 public class DebuggerTraceViewDiffPlugin extends AbstractDebuggerPlugin {
-	static final Color COLOR_DIFF = new GColor("color.bg.debugger.diff.marker");
+	static final Color COLOR_DIFF = new GColor("color.bg.highlight.listing.diff");
 
 	protected static final String MARKER_NAME = "Trace Diff";
 	protected static final String MARKER_DESCRIPTION = "Difference between snapshots in this trace";

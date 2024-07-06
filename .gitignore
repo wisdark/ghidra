@@ -68,6 +68,7 @@ Release
 .classpath
 .settings/
 .prefs
+.pydevproject
 
 # Ignore XTEXT generated dirs/files
 */*/*/*/xtend-gen
@@ -80,11 +81,6 @@ Release
 **/.idea
 *.iml
 .idea
-
-# Ignore gradle wrapper files
-gradle/wrapper
-gradlew
-gradlew.*
 
 # Ignore logs and core dumps
 *.log

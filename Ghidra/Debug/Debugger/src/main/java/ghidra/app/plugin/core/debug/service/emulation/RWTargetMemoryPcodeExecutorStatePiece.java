@@ -18,8 +18,10 @@ package ghidra.app.plugin.core.debug.service.emulation;
 import java.util.Map;
 import java.util.concurrent.CompletableFuture;
 
-import ghidra.app.plugin.core.debug.service.emulation.data.PcodeDebuggerDataAccess;
-import ghidra.app.plugin.core.debug.service.emulation.data.PcodeDebuggerMemoryAccess;
+import generic.ULongSpan;
+import generic.ULongSpan.ULongSpanSet;
+import ghidra.debug.api.emulation.PcodeDebuggerDataAccess;
+import ghidra.debug.api.emulation.PcodeDebuggerMemoryAccess;
 import ghidra.generic.util.datastruct.SemisparseByteArray;
 import ghidra.program.model.address.*;
 import ghidra.program.model.lang.Language;
@@ -81,27 +83,27 @@ public class RWTargetMemoryPcodeExecutorStatePiece
 		}
 
 		@Override
-		protected void fillUninitialized(AddressSet uninitialized) {
+		protected ULongSpanSet readUninitializedFromTarget(ULongSpanSet uninitialized) {
 			if (space.isUniqueSpace()) {
-				return;
+				return uninitialized;
 			}
 			AddressSetView unknown;
-			unknown = backing.intersectUnknown(uninitialized);
+			AddressSet addrsUninit = addrSet(uninitialized);
+			unknown = backing.intersectUnknown(addrsUninit);
 			if (unknown.isEmpty()) {
-				return;
+				return uninitialized;
 			}
-			if (waitTimeout(backing.readFromTargetMemory(unknown))) {
-				unknown = backing.intersectUnknown(uninitialized);
+			if (backing.isLive() && waitTimeout(backing.readFromTargetMemory(unknown))) {
+				unknown = backing.intersectUnknown(addrsUninit);
 				if (unknown.isEmpty()) {
-					return;
+					return uninitialized;
 				}
 			}
 			if (backing.readFromStaticImages(bytes, unknown)) {
-				unknown = backing.intersectUnknown(uninitialized);
-				if (unknown.isEmpty()) {
-					return;
-				}
+				ULongSpan bound = uninitialized.bound();
+				return bytes.getUninitialized(bound.min(), bound.max());
 			}
+			return uninitialized;
 		}
 
 		@Override

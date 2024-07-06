@@ -15,10 +15,13 @@
  */
 /// \file transform.hh
 /// \brief Classes for building large scale transforms of function data-flow
-#ifndef __TRANSFORM__
-#define __TRANSFORM__
+#ifndef __TRANSFORM_HH__
+#define __TRANSFORM_HH__
 
 #include "varnode.hh"
+
+namespace ghidra {
+
 class Funcdata;			// Forward declaration
 class TransformOp;
 
@@ -84,6 +87,7 @@ private:
 public:
   TransformVar *getOut(void) const { return output; }	///< Get the output placeholder variable for \b this operator
   TransformVar *getIn(int4 i) const { return input[i]; }	///< Get the i-th input placeholder variable for \b this
+  void inheritIndirect(PcodeOp *indOp);		///< Set \e indirect \e creation flags for \b this based on given INDIRECT
 };
 
 /// \brief Describes a (register) storage location and the ways it might be split into lanes
@@ -248,4 +252,5 @@ inline bool TransformManager::preexistingGuard(int4 slot,TransformVar *rvn)
   return true;			// The op was not (will not be) visited on slot 0, build now
 }
 
+} // End namespace ghidra
 #endif

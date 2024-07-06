@@ -57,14 +57,14 @@ public class CustomNimbusLookAndFeel extends NimbusLookAndFeel {
 		// normally all of this wiring is handled by the LookAndFeelManager (see above)
 		UiDefaultsMapper uiDefaultsMapper = new NimbusUiDefaultsMapper(defaults);
 		installJavaDefaultsIntoThemeManager(uiDefaultsMapper);
-		uiDefaultsMapper.installValuesIntoUIDefaults(getApplicationOverrides());
+		uiDefaultsMapper.installValuesIntoUIDefaults(themeManager.getCurrentValues());
 
 		normalizedIdToLafIdMap = uiDefaultsMapper.getNormalizedIdToLafIdMap();
 		return defaults;
 	}
 
 	protected void installJavaDefaultsIntoThemeManager(UiDefaultsMapper uiDefaultsMapper) {
-		GThemeValueMap javaDefaults = uiDefaultsMapper.getJavaDefaults();
+		GThemeValueMap javaDefaults = uiDefaultsMapper.getNormalizedJavaDefaults();
 		themeManager.setJavaDefaults(javaDefaults);
 	}
 
@@ -77,9 +77,5 @@ public class CustomNimbusLookAndFeel extends NimbusLookAndFeel {
 
 	public Map<String, String> getNormalizedIdToLafIdMap() {
 		return normalizedIdToLafIdMap;
-	}
-
-	protected GThemeValueMap getApplicationOverrides() {
-		return themeManager.getApplicationOverrides();
 	}
 }

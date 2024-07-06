@@ -665,8 +665,12 @@ public class DiffTestAdapter extends AbstractGhidraHeadedIntegrationTest {
 
 	void pickSecondProgram(final Program program2) {
 
-		OpenVersionedFileDialogTestFake dialog = new OpenVersionedFileDialogTestFake(program2);
-		diffPlugin.setDiffOpenVersionedFileDialog(dialog);
+		OpenVersionedFileDialogTestFake dialog = runSwing(() -> {
+			OpenVersionedFileDialogTestFake openDialog =
+				new OpenVersionedFileDialogTestFake(program2);
+			diffPlugin.setDiffOpenVersionedFileDialog(openDialog);
+			return openDialog;
+		});
 
 		launchDiffByAction();
 
@@ -720,11 +724,11 @@ public class DiffTestAdapter extends AbstractGhidraHeadedIntegrationTest {
 	}
 
 	void launchDiffByAction() {
-		setToggleActionSelected(openClosePgm2, new ActionContext(), true, false);
+		setToggleActionSelected(openClosePgm2, new DefaultActionContext(), true, false);
 	}
 
 	void closeDiffByAction() {
-		setToggleActionSelected(openClosePgm2, new ActionContext(), false, false);
+		setToggleActionSelected(openClosePgm2, new DefaultActionContext(), false, false);
 	}
 
 	void invokeAndWait(DockingActionIf action) {

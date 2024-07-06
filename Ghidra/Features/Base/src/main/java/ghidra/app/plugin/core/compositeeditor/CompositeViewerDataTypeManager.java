@@ -15,18 +15,24 @@
  */
 package ghidra.app.plugin.core.compositeeditor;
 
+import java.io.IOException;
+
 import ghidra.program.model.data.*;
+import ghidra.program.model.lang.ProgramArchitecture;
+import ghidra.util.exception.AssertException;
+import ghidra.util.exception.CancelledException;
+import ghidra.util.task.TaskMonitor;
 
 public class CompositeViewerDataTypeManager extends StandAloneDataTypeManager {
-	
+
 	/** 
 	 * The data type manager for original composite data type being edited.
 	 * This is where the edited datatype will be written back to.
 	 */
-	private DataTypeManager originalDTM;
-	private Composite originalComposite;
-	private Composite viewComposite;
-	private int transactionID;
+	private final DataTypeManager originalDTM;
+	private final Composite originalComposite;
+	private final Composite viewComposite;
+	private final int transactionID;
 
 	/**
 	 * Creates a data type manager that the structure editor will use
@@ -37,20 +43,46 @@ public class CompositeViewerDataTypeManager extends StandAloneDataTypeManager {
 	public CompositeViewerDataTypeManager(String rootName, Composite originalComposite) {
 		super(rootName, originalComposite.getDataTypeManager().getDataOrganization());
 		this.originalComposite = originalComposite;
-		transactionID = startTransaction(""); 
+		transactionID = super.startTransaction("");
 		originalDTM = originalComposite.getDataTypeManager();
-		universalID = originalDTM.getUniversalID(); // mimic original DTM
+
+		ProgramArchitecture arch = originalDTM.getProgramArchitecture();
+		if (arch != null) {
+			try {
+				setProgramArchitecture(arch, null, true, TaskMonitor.DUMMY);
+			}
+			catch (CancelledException e) {
+				throw new AssertException(e); // unexpected
+			}
+			catch (IOException e) {
+				errHandler.dbError(e);
+			}
+		}
+
 		viewComposite = (Composite) super.resolve(originalComposite, null);
 	}
-	
+
 	@Override
-    public void close() {
-		endTransaction(transactionID, true);
+	protected final boolean isArchitectureChangeAllowed() {
+		return false;
+	}
+
+	@Override
+	public void close() {
+		super.endTransaction(transactionID, true);
 		super.close();
 	}
-	
+
+	/**
+	 * Get the {@link DataTypeManager} associated with the original composite datatype being edited.
+	 * @return original datatype manager
+	 */
+	public DataTypeManager getOriginalDataTypeManager() {
+		return originalDTM;
+	}
+
 	@Override
-    public ArchiveType getType() {
+	public ArchiveType getType() {
 		return originalDTM.getType();
 	}
 
@@ -69,6 +101,35 @@ public class CompositeViewerDataTypeManager extends StandAloneDataTypeManager {
 			return viewComposite;
 		}
 		return super.resolve(dataType, handler);
+	}
+
+	//
+	// Transaction support has been disabled since a single open transaction is maintained
+	// until this DTM is closed.
+	//
+
+	@SuppressWarnings("sync-override")
+	@Override
+	public int startTransaction(String description) {
+		// ignore - not yet supported
+		return 0;
+	}
+
+	@Override
+	public void endTransaction(int txId, boolean commit) {
+		// ignore - not yet supported
+	}
+
+	@SuppressWarnings("sync-override")
+	@Override
+	public boolean canUndo() {
+		return false;
+	}
+
+	@SuppressWarnings("sync-override")
+	@Override
+	public boolean canRedo() {
+		return false;
 	}
 
 }

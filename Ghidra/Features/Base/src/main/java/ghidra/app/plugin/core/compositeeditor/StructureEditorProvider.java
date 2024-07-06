@@ -64,7 +64,7 @@ public class StructureEditorProvider extends CompositeEditorProvider {
 			new DeleteAction(this),
 			new PointerAction(this),
 			new ArrayAction(this),
-			new FindReferencesToField(this),
+			new FindReferencesToStructureFieldAction(this),
 			new UnpackageAction(this),
 			new EditComponentAction(this),
 			new EditFieldAction(this),
@@ -88,5 +88,11 @@ public class StructureEditorProvider extends CompositeEditorProvider {
 	@Override
 	public String getHelpTopic() {
 		return "DataTypeEditors";
+	}
+
+	public void selectField(String fieldName) {
+		if (fieldName != null) {
+			editorPanel.selectField(fieldName);
+		}
 	}
 }

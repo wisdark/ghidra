@@ -19,11 +19,12 @@ import static org.junit.Assert.*;
 
 import java.awt.event.MouseEvent;
 import java.util.*;
-import java.util.concurrent.TimeUnit;
 
-import org.junit.*;
+import org.junit.Before;
+import org.junit.Test;
 import org.junit.experimental.categories.Category;
 
+import db.Transaction;
 import docking.widgets.filechooser.GhidraFileChooser;
 import generic.Unique;
 import generic.test.category.NightlyCategory;
@@ -31,39 +32,31 @@ import ghidra.app.plugin.core.debug.gui.*;
 import ghidra.app.plugin.core.debug.gui.DebuggerBlockChooserDialog.MemoryBlockRow;
 import ghidra.app.plugin.core.debug.gui.DebuggerResources.AbstractImportFromFileSystemAction;
 import ghidra.app.plugin.core.debug.gui.DebuggerResources.AbstractSelectAddressesAction;
+import ghidra.app.plugin.core.debug.gui.action.AutoMapSpec;
+import ghidra.app.plugin.core.debug.gui.action.NoneAutoMapSpec;
 import ghidra.app.plugin.core.debug.gui.listing.DebuggerListingPlugin;
 import ghidra.app.plugin.core.debug.gui.listing.DebuggerListingProvider;
 import ghidra.app.plugin.core.debug.gui.modules.DebuggerModuleMapProposalDialog.ModuleMapTableColumns;
 import ghidra.app.plugin.core.debug.gui.modules.DebuggerModulesProvider.MapModulesAction;
 import ghidra.app.plugin.core.debug.gui.modules.DebuggerModulesProvider.MapSectionsAction;
 import ghidra.app.plugin.core.debug.gui.modules.DebuggerSectionMapProposalDialog.SectionMapTableColumns;
+import ghidra.app.plugin.core.debug.service.tracemgr.DebuggerTraceManagerServiceTestAccess;
 import ghidra.app.services.DebuggerListingService;
-import ghidra.app.services.ModuleMapProposal.ModuleMapEntry;
-import ghidra.app.services.SectionMapProposal.SectionMapEntry;
-import ghidra.app.services.TraceRecorder;
-import ghidra.dbg.attributes.TargetPrimitiveDataType.DefaultTargetPrimitiveDataType;
-import ghidra.dbg.attributes.TargetPrimitiveDataType.PrimitiveKind;
-import ghidra.dbg.model.TestTargetModule;
-import ghidra.dbg.model.TestTargetTypedefDataType;
-import ghidra.dbg.util.TargetDataTypeConverter;
+import ghidra.debug.api.modules.ModuleMapProposal.ModuleMapEntry;
+import ghidra.debug.api.modules.SectionMapProposal.SectionMapEntry;
 import ghidra.framework.main.DataTreeDialog;
 import ghidra.plugin.importer.ImporterPlugin;
 import ghidra.program.model.address.AddressSet;
-import ghidra.program.model.data.DataType;
 import ghidra.program.model.mem.MemoryBlock;
 import ghidra.trace.database.memory.DBTraceMemoryManager;
 import ghidra.trace.model.Lifespan;
-import ghidra.trace.model.Trace;
-import ghidra.trace.model.data.TraceBasedDataTypeManager;
 import ghidra.trace.model.memory.TraceMemoryFlag;
 import ghidra.trace.model.memory.TraceOverlappedRegionException;
 import ghidra.trace.model.modules.*;
-import ghidra.trace.model.symbol.TraceSymbol;
-import ghidra.util.database.UndoableTransaction;
 import ghidra.util.exception.DuplicateNameException;
 
 @Category(NightlyCategory.class) // this may actually be an @PortSensitive test
-public class DebuggerModulesProviderLegacyTest extends AbstractGhidraHeadedDebuggerGUITest {
+public class DebuggerModulesProviderLegacyTest extends AbstractGhidraHeadedDebuggerTest {
 	protected DebuggerModulesPlugin modulesPlugin;
 	protected DebuggerModulesProvider modulesProvider;
 
@@ -79,11 +72,14 @@ public class DebuggerModulesProviderLegacyTest extends AbstractGhidraHeadedDebug
 	public void setUpModulesProviderTest() throws Exception {
 		modulesPlugin = addPlugin(tool, DebuggerModulesPlugin.class);
 		modulesProvider = waitForComponentProvider(DebuggerModulesProvider.class);
+
+		// TODO: This seems to hold up the task manager.
+		modulesProvider.setAutoMapSpec(AutoMapSpec.fromConfigName(NoneAutoMapSpec.CONFIG_NAME));
 	}
 
 	protected void addRegionsFromModules()
 			throws TraceOverlappedRegionException, DuplicateNameException {
-		try (UndoableTransaction tid = tb.startTransaction()) {
+		try (Transaction tx = tb.startTransaction()) {
 			DBTraceMemoryManager manager = tb.trace.getMemoryManager();
 			for (TraceModule module : tb.trace.getModuleManager().getAllModules()) {
 				for (TraceSection section : module.getSections()) {
@@ -108,7 +104,7 @@ public class DebuggerModulesProviderLegacyTest extends AbstractGhidraHeadedDebug
 
 	protected void addModules() throws Exception {
 		TraceModuleManager manager = tb.trace.getModuleManager();
-		try (UndoableTransaction tid = tb.startTransaction()) {
+		try (Transaction tx = tb.startTransaction()) {
 			modExe = manager.addLoadedModule("Processes[1].Modules[first_proc]", "first_proc",
 				tb.range(0x55550000, 0x5575007f), 0);
 			secExeText = modExe.addSection("Processes[1].Modules[first_proc].Sections[.text]",
@@ -126,7 +122,7 @@ public class DebuggerModulesProviderLegacyTest extends AbstractGhidraHeadedDebug
 	}
 
 	protected MemoryBlock addBlock() throws Exception {
-		try (UndoableTransaction tid = UndoableTransaction.start(program, "Add block")) {
+		try (Transaction tx = program.openTransaction("Add block")) {
 			return program.getMemory()
 					.createInitializedBlock(".text", tb.addr(0x00400000), 0x1000, (byte) 0, monitor,
 						false);
@@ -225,7 +221,7 @@ public class DebuggerModulesProviderLegacyTest extends AbstractGhidraHeadedDebug
 		waitForSwing();
 
 		MemoryBlock block = addBlock();
-		try (UndoableTransaction tid = UndoableTransaction.start(program, "Change name")) {
+		try (Transaction tx = program.openTransaction("Change name")) {
 			program.setName(modExe.getName());
 		}
 		waitForDomainObject(program);
@@ -261,7 +257,7 @@ public class DebuggerModulesProviderLegacyTest extends AbstractGhidraHeadedDebug
 
 		assertProviderPopulated(); // Cheap sanity check
 
-		try (UndoableTransaction tid = tb.startTransaction()) {
+		try (Transaction tx = tb.startTransaction()) {
 			modExe.delete();
 		}
 		waitForDomainObject(tb.trace);
@@ -307,6 +303,7 @@ public class DebuggerModulesProviderLegacyTest extends AbstractGhidraHeadedDebug
 
 	@Test
 	public void testActivatingNoTraceEmptiesProvider() throws Exception {
+		DebuggerTraceManagerServiceTestAccess.setEnsureActiveTrace(traceManager, false);
 		createAndOpenTrace();
 
 		addModules();
@@ -355,7 +352,7 @@ public class DebuggerModulesProviderLegacyTest extends AbstractGhidraHeadedDebug
 		assertTrue(modulesProvider.actionMapIdentically.isEnabled());
 
 		// Need some substance in the program
-		try (UndoableTransaction tid = UndoableTransaction.start(program, "Populate")) {
+		try (Transaction tx = program.openTransaction("Populate")) {
 			addBlock();
 		}
 		waitForDomainObject(program);
@@ -376,7 +373,7 @@ public class DebuggerModulesProviderLegacyTest extends AbstractGhidraHeadedDebug
 
 	@Test
 	public void testActionMapModules() throws Exception {
-		assertFalse(modulesProvider.actionMapModules.isEnabled());
+		assertDisabled(modulesProvider, modulesProvider.actionMapModules);
 
 		createAndOpenTrace();
 		createAndOpenProgramFromTrace();
@@ -388,9 +385,9 @@ public class DebuggerModulesProviderLegacyTest extends AbstractGhidraHeadedDebug
 		waitForSwing();
 
 		// Still
-		assertFalse(modulesProvider.actionMapModules.isEnabled());
+		assertDisabled(modulesProvider, modulesProvider.actionMapModules);
 
-		try (UndoableTransaction tid = UndoableTransaction.start(program, "Change name")) {
+		try (Transaction tx = program.openTransaction("Change name")) {
 			program.setImageBase(addr(program, 0x00400000), true);
 			program.setName(modExe.getName());
 
@@ -402,7 +399,7 @@ public class DebuggerModulesProviderLegacyTest extends AbstractGhidraHeadedDebug
 
 		modulesProvider.setSelectedModules(Set.of(modExe));
 		waitForSwing();
-		assertTrue(modulesProvider.actionMapModules.isEnabled());
+		assertEnabled(modulesProvider, modulesProvider.actionMapModules);
 
 		performEnabledAction(modulesProvider, modulesProvider.actionMapModules, false);
 
@@ -444,7 +441,7 @@ public class DebuggerModulesProviderLegacyTest extends AbstractGhidraHeadedDebug
 
 	@Test
 	public void testActionMapSections() throws Exception {
-		assertFalse(modulesProvider.actionMapSections.isEnabled());
+		assertDisabled(modulesProvider, modulesProvider.actionMapSections);
 
 		createAndOpenTrace();
 		createAndOpenProgramFromTrace();
@@ -456,10 +453,10 @@ public class DebuggerModulesProviderLegacyTest extends AbstractGhidraHeadedDebug
 		waitForSwing();
 
 		// Still
-		assertFalse(modulesProvider.actionMapSections.isEnabled());
+		assertDisabled(modulesProvider, modulesProvider.actionMapSections);
 
 		MemoryBlock block = addBlock();
-		try (UndoableTransaction tid = UndoableTransaction.start(program, "Change name")) {
+		try (Transaction tx = program.openTransaction("Change name")) {
 			program.setName(modExe.getName());
 		}
 		waitForDomainObject(program);
@@ -468,7 +465,7 @@ public class DebuggerModulesProviderLegacyTest extends AbstractGhidraHeadedDebug
 
 		modulesProvider.setSelectedSections(Set.of(secExeText));
 		waitForSwing();
-		assertTrue(modulesProvider.actionMapSections.isEnabled());
+		assertEnabled(modulesProvider, modulesProvider.actionMapSections);
 
 		performEnabledAction(modulesProvider, modulesProvider.actionMapSections, false);
 
@@ -549,119 +546,6 @@ public class DebuggerModulesProviderLegacyTest extends AbstractGhidraHeadedDebug
 	}
 
 	@Test
-	@Ignore("This action is hidden until supported")
-	public void testActionCaptureTypes() throws Exception {
-		assertFalse(modulesProvider.actionCaptureTypes.isEnabled());
-		createTestModel();
-		mb.createTestProcessesAndThreads();
-
-		TraceRecorder recorder = modelService.recordTargetAndActivateTrace(mb.testProcess1,
-			createTargetTraceMapper(mb.testProcess1));
-		Trace trace = recorder.getTrace();
-
-		// TODO: A region should not be required first. Just to get a memMapper?
-		mb.testProcess1.addRegion("Memory[first_proc:.text]", mb.rng(0x55550000, 0x555500ff),
-			"rx");
-		TestTargetModule module =
-			mb.testProcess1.modules.addModule("Modules[first_proc]",
-				mb.rng(0x55550000, 0x555500ff));
-		// NOTE: A section should not be required at this point.
-		TestTargetTypedefDataType typedef = module.types.addTypedefDataType("myInt",
-			new DefaultTargetPrimitiveDataType(PrimitiveKind.SINT, 4));
-		waitForDomainObject(trace);
-
-		// Still
-		assertFalse(modulesProvider.actionCaptureTypes.isEnabled());
-
-		traceManager.activateTrace(trace);
-		waitForSwing();
-		TraceModule traceModule = waitForValue(() -> recorder.getTraceModule(module));
-		modulesProvider.setSelectedModules(Set.of(traceModule));
-		waitForSwing();
-		// TODO: When action is included, put this assertion back
-		//assertTrue(modulesProvider.actionCaptureTypes.isEnabled());
-
-		performEnabledAction(modulesProvider, modulesProvider.actionCaptureTypes, true);
-		waitForBusyTool(tool);
-		waitForDomainObject(trace);
-
-		// TODO: A separate action/script to transfer types from trace DTM into mapped program DTMs
-		TraceBasedDataTypeManager dtm = trace.getDataTypeManager();
-		TargetDataTypeConverter conv = new TargetDataTypeConverter(dtm);
-		DataType expType =
-			conv.convertTargetDataType(typedef).get(DEFAULT_WAIT_TIMEOUT, TimeUnit.MILLISECONDS);
-		// TODO: Some heuristic or convention to extract the module name, if applicable
-		waitForPass(() -> {
-			DataType actType = dtm.getDataType("/Modules[first_proc].Types/myInt");
-			assertTypeEquals(expType, actType);
-		});
-
-		// TODO: When capture-types action is included, put this assertion back
-		//assertTrue(modulesProvider.actionCaptureTypes.isEnabled());
-		waitForLock(trace);
-		recorder.stopRecording();
-		waitForSwing();
-		assertFalse(modulesProvider.actionCaptureTypes.isEnabled());
-	}
-
-	@Test
-	public void testActionCaptureSymbols() throws Exception {
-		assertFalse(modulesProvider.actionCaptureSymbols.isEnabled());
-		createTestModel();
-		mb.createTestProcessesAndThreads();
-
-		TraceRecorder recorder = modelService.recordTargetAndActivateTrace(mb.testProcess1,
-			createTargetTraceMapper(mb.testProcess1));
-		Trace trace = recorder.getTrace();
-
-		// TODO: A region should not be required first. Just to get a memMapper?
-		mb.testProcess1.addRegion("first_proc:.text", mb.rng(0x55550000, 0x555500ff),
-			"rx");
-		TestTargetModule module =
-			mb.testProcess1.modules.addModule("first_proc", mb.rng(0x55550000, 0x555500ff));
-		// NOTE: A section should not be required at this point.
-		module.symbols.addSymbol("test", mb.addr(0x55550080), 8,
-			new DefaultTargetPrimitiveDataType(PrimitiveKind.UNDEFINED, 8));
-		waitForDomainObject(trace);
-
-		// Still
-		assertFalse(modulesProvider.actionCaptureSymbols.isEnabled());
-
-		traceManager.activateTrace(trace);
-		waitForSwing();
-		waitForPass(() -> {
-			TraceModule traceModule = recorder.getTraceModule(module);
-			assertNotNull(traceModule);
-			modulesProvider.setSelectedModules(Set.of(traceModule));
-			waitForSwing();
-			assertTrue(modulesProvider.actionCaptureSymbols.isEnabled());
-		});
-
-		performEnabledAction(modulesProvider, modulesProvider.actionCaptureSymbols, true);
-		waitForBusyTool(tool);
-		waitForDomainObject(trace);
-
-		// TODO: A separate action/script to transfer symbols from trace into mapped programs
-		// NOTE: Used types must go along.
-		Collection<? extends TraceSymbol> symbols =
-			trace.getSymbolManager().allSymbols().getNamed("test");
-		assertEquals(1, symbols.size());
-		TraceSymbol sym = symbols.iterator().next();
-		// TODO: Some heuristic or convention to extract the module name, if applicable
-		assertEquals("Processes[1].Modules[first_proc].Symbols::test", sym.getName(true));
-		// NOTE: builder (b) is not initialized here
-		assertEquals(trace.getBaseAddressFactory().getDefaultAddressSpace().getAddress(0x55550080),
-			sym.getAddress());
-		// TODO: Check data type once those are captured in Data units.
-
-		assertTrue(modulesProvider.actionCaptureSymbols.isEnabled());
-		waitForLock(trace);
-		recorder.stopRecording();
-		waitForSwing();
-		assertFalse(modulesProvider.actionCaptureSymbols.isEnabled());
-	}
-
-	@Test
 	public void testActionImportFromFileSystem() throws Exception {
 		addPlugin(tool, ImporterPlugin.class);
 		createAndOpenTrace();
@@ -669,7 +553,7 @@ public class DebuggerModulesProviderLegacyTest extends AbstractGhidraHeadedDebug
 		traceManager.activateTrace(tb.trace);
 		waitForSwing();
 
-		try (UndoableTransaction tid = tb.startTransaction()) {
+		try (Transaction tx = tb.startTransaction()) {
 			modExe.setName("/bin/echo"); // File has to exist
 		}
 		waitForPass(

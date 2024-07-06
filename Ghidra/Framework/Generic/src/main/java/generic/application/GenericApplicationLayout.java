@@ -16,7 +16,7 @@
 package generic.application;
 
 import java.io.File;
-import java.io.FileNotFoundException;
+import java.io.IOException;
 import java.util.*;
 import java.util.Map.Entry;
 import java.util.regex.Matcher;
@@ -42,7 +42,7 @@ public class GenericApplicationLayout extends ApplicationLayout {
 
 	/**
 	 * System property that allows specification of additional application root dirs.  This is used
-	 * for clients that build plugins external to an installation.  The property will be parsed 
+	 * for clients that build plugins external to an installation.  The property will be parsed
 	 * using {@link File#pathSeparator}, allowing for multiple values.
 	 */
 	private static final String ADDITIONAL_APPLICATION_ROOT_DIRS =
@@ -59,9 +59,9 @@ public class GenericApplicationLayout extends ApplicationLayout {
 	 *
 	 * @param name The name of the application.
 	 * @param version The version of the application.
-	 * @throws FileNotFoundException if there was a problem getting a user directory.
+	 * @throws IOException if there was a problem getting a user directory.
 	 */
-	public GenericApplicationLayout(String name, String version) throws FileNotFoundException {
+	public GenericApplicationLayout(String name, String version) throws IOException {
 		this(new ApplicationProperties(name, version, NO_RELEASE_NAME));
 	}
 
@@ -70,10 +70,10 @@ public class GenericApplicationLayout extends ApplicationLayout {
 	 * properties.  The default Ghidra application root directory(s) will be used.
 	 *
 	 * @param applicationProperties The properties object that will be read system properties.
-	 * @throws FileNotFoundException if there was a problem getting a user directory.
+	 * @throws IOException if there was a problem getting a user directory.
 	 */
 	public GenericApplicationLayout(ApplicationProperties applicationProperties)
-			throws FileNotFoundException {
+			throws IOException {
 		this(getDefaultApplicationRootDirs(), applicationProperties);
 	}
 
@@ -85,10 +85,10 @@ public class GenericApplicationLayout extends ApplicationLayout {
 	 * used to identify modules and resources.  The first entry will be treated as the
 	 * installation root.
 	 * @param applicationProperties The properties object that will be read system properties.
-	 * @throws FileNotFoundException if there was a problem getting a user directory.
+	 * @throws IOException if there was a problem getting a user directory.
 	 */
 	public GenericApplicationLayout(Collection<ResourceFile> applicationRootDirs,
-			ApplicationProperties applicationProperties) throws FileNotFoundException {
+			ApplicationProperties applicationProperties) throws IOException {
 
 		this.applicationProperties = Objects.requireNonNull(applicationProperties);
 		this.applicationRootDirs = applicationRootDirs;
@@ -103,13 +103,26 @@ public class GenericApplicationLayout extends ApplicationLayout {
 		// Modules
 		Collection<ResourceFile> moduleRoots =
 			ModuleUtilities.findModuleRootDirectories(applicationRootDirs);
-		modules =
+
+		Map<String, GModule> allModules = new HashMap<>();
+		Map<String, GModule> discoveredModules =
 			ModuleUtilities.findModules(applicationRootDirs, moduleRoots, new ClasspathFilter());
+		allModules.putAll(discoveredModules);
+
+		for (ResourceFile root : applicationRootDirs) {
+			GModule rootModule = new GModule(applicationRootDirs, root);
+			allModules.put(rootModule.getName(), rootModule);
+		}
+
+		modules = Collections.unmodifiableMap(allModules);
 
 		// User directories
-		userTempDir = ApplicationUtilities.getDefaultUserTempDir(applicationProperties);
+		userTempDir =
+			ApplicationUtilities.getDefaultUserTempDir(applicationProperties.getApplicationName());
 		userSettingsDir = ApplicationUtilities.getDefaultUserSettingsDir(applicationProperties,
 			applicationInstallationDir);
+
+		extensionInstallationDirs = Collections.emptyList();
 	}
 
 	protected Collection<ResourceFile> getAdditionalApplicationRootDirs(
@@ -160,9 +173,9 @@ public class GenericApplicationLayout extends ApplicationLayout {
 	}
 
 	/**
-	 * Get the default list of Application directories.  In repo-based development mode this 
-	 * includes the root Ghidra directory within each repo.  When not in development mode, the 
-	 * requirement is that the current working directory correspond to the installation root.  The 
+	 * Get the default list of Application directories.  In repo-based development mode this
+	 * includes the root Ghidra directory within each repo.  When not in development mode, the
+	 * requirement is that the current working directory correspond to the installation root.  The
 	 * first entry will be the primary root in both cases.
 	 * @return root directories
 	 */

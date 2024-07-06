@@ -26,7 +26,6 @@ import javax.swing.event.*;
 import javax.swing.table.TableColumnModel;
 import javax.swing.table.TableModel;
 
-import org.apache.commons.collections4.CollectionUtils;
 import org.jdom.Element;
 
 import docking.DockingWindowManager;
@@ -146,6 +145,12 @@ public class GTableFilterPanel<ROW_OBJECT> extends JPanel {
 	private SwingUpdateManager updateManager = new SwingUpdateManager(250, 1000, () -> {
 		String text = filterField.getText();
 		TableFilter<ROW_OBJECT> tableFilter = filterFactory.getTableFilter(text, transformer);
+
+		// Having an edit active when the data changes can lead to incorrect row editing.  The table
+		// knows which row is being edited by number.   If the data for that row number changes as a
+		// result of a filter, the table does not know this and may update the wrong row data.
+		table.editingCanceled(null);
+
 		textFilterModel.setTableFilter(
 			getCombinedTableFilter(secondaryTableFilter, tableFilter, columnTableFilter));
 	});
@@ -193,6 +198,33 @@ public class GTableFilterPanel<ROW_OBJECT> extends JPanel {
 	 */
 	public GTableFilterPanel(JTable table, RowObjectTableModel<ROW_OBJECT> tableModel) {
 		this(table, tableModel, " Filter: ");
+	}
+
+	/**
+	 * Sets an accessible name on the filter component. This prefix will be used to assign
+	 * meaningful accessible names to the filter text field and the filter options button such
+	 * that screen readers will properly describe them.
+	 * <P>
+	 * This prefix should be the base name that describes the type of items in the table.  For
+	 * example if the table contains fruits, then "Fruits" would be an appropriate prefix name.
+	 * This method will then append the necessary information to name the text field and the button.
+	 *
+	 * @param namePrefix the accessible name prefix to assign to the filter component. 
+	 */
+	public void setAccessibleNamePrefix(String namePrefix) {
+		filterField.setAccessibleNamePrefix(namePrefix);
+		String filterOptionsPrefix = namePrefix + " Filter Options";
+		filterStateButton.setName(filterOptionsPrefix + " Button");
+
+		// screen reader reads the accessible name followed by the role ("button" in this case)
+		// so don't append "button" to the accessible name
+		filterStateButton.getAccessibleContext().setAccessibleName(filterOptionsPrefix);
+
+		// Setting the accessible description to empty string prevents it from reading any tooltips
+		// on the button when the button gets focus. These buttons tend to have particularly large
+		// tooltips which seem excessive to read to the user every time they get focus. We may need
+		// to revisit this decision.
+		filterStateButton.getAccessibleContext().setAccessibleDescription("");
 	}
 
 	public GTableFilterPanel(JTable table, RowObjectTableModel<ROW_OBJECT> tableModel,
@@ -508,10 +540,10 @@ public class GTableFilterPanel<ROW_OBJECT> extends JPanel {
 		RowObjectFilterModel<ROW_OBJECT> newModel = createTextFilterModel(currentModel);
 
 		// only wrapped models are set on tables, since they have to replace the original
-		if (newModel instanceof TableModelWrapper) {
+		if (newModel instanceof WrappingTableModel) {
 			table.setModel(newModel);
 
-			TableModelWrapper<ROW_OBJECT> wrapper = (TableModelWrapper<ROW_OBJECT>) newModel;
+			WrappingTableModel wrapper = (WrappingTableModel) newModel;
 			currentModel.addTableModelListener(new TranslatingTableModelListener(wrapper));
 		}
 
@@ -521,7 +553,6 @@ public class GTableFilterPanel<ROW_OBJECT> extends JPanel {
 		return newModel;
 	}
 
-	// Cast from ThreadedTableModel...
 	protected RowObjectFilterModel<ROW_OBJECT> createTextFilterModel(
 			RowObjectTableModel<ROW_OBJECT> model) {
 		RowObjectFilterModel<ROW_OBJECT> newModel = null;
@@ -719,43 +750,7 @@ public class GTableFilterPanel<ROW_OBJECT> extends JPanel {
 	 * @param items the row objects to select
 	 */
 	public void setSelectedItems(List<ROW_OBJECT> items) {
-
-		if (CollectionUtils.isEmpty(items)) {
-			table.clearSelection();
-			return;
-		}
-
-		ListSelectionModel selectionModel = table.getSelectionModel();
-		int mode = selectionModel.getSelectionMode();
-		if (mode == ListSelectionModel.SINGLE_SELECTION) {
-			// take the last item to mimic what the selection model does internally
-			ROW_OBJECT item = items.get(items.size() - 1);
-			int viewRow = textFilterModel.getViewIndex(item);
-			table.setRowSelectionInterval(viewRow, viewRow);
-			return;
-		}
-
-		//
-		// For ListSelectionModel SINGLE_INTERVAL_SELECTION and MULTIPLE_INTERVAL_SELECTION, the
-		// model will update any selection given to it to match the current mode.
-		//
-		List<Integer> rows = new ArrayList<>();
-		for (ROW_OBJECT item : items) {
-			int viewRow = textFilterModel.getViewIndex(item);
-			if (viewRow >= 0) {
-				rows.add(viewRow);
-			}
-		}
-		if (rows.isEmpty()) {
-			return; // items may be filtered out of view
-		}
-
-		selectionModel.setValueIsAdjusting(true);
-		selectionModel.clearSelection();
-		for (int row : rows) {
-			selectionModel.addSelectionInterval(row, row);
-		}
-		selectionModel.setValueIsAdjusting(false);
+		TableUtils.setSelectedItems(table, items);
 	}
 
 	/**
@@ -888,9 +883,9 @@ public class GTableFilterPanel<ROW_OBJECT> extends JPanel {
 	 */
 	private class TranslatingTableModelListener implements TableModelListener {
 
-		private TableModelWrapper<ROW_OBJECT> tableModelWrapper;
+		private WrappingTableModel tableModelWrapper;
 
-		TranslatingTableModelListener(TableModelWrapper<ROW_OBJECT> tableModelWrapper) {
+		TranslatingTableModelListener(WrappingTableModel tableModelWrapper) {
 			this.tableModelWrapper = tableModelWrapper;
 		}
 
@@ -901,7 +896,7 @@ public class GTableFilterPanel<ROW_OBJECT> extends JPanel {
 			// so that the indices used in the event are correct for the filtered state of the
 			// view.
 			//
-			tableModelWrapper.fireTableDataChanged(translateEventForFilter(e));
+			tableModelWrapper.fireTableChanged(translateEventForFilter(e));
 		}
 
 		private TableModelEvent translateEventForFilter(TableModelEvent event) {
@@ -942,9 +937,8 @@ public class GTableFilterPanel<ROW_OBJECT> extends JPanel {
 			}
 
 			isUpdatingModel = true;
-			if (textFilterModel instanceof TableModelWrapper) {
-				TableModelWrapper<ROW_OBJECT> tableModelWrapper =
-					(TableModelWrapper<ROW_OBJECT>) textFilterModel;
+			if (textFilterModel instanceof WrappingTableModel) {
+				WrappingTableModel tableModelWrapper = (WrappingTableModel) textFilterModel;
 				tableModelWrapper.wrappedModelChangedFromTableChangedEvent();
 			}
 			filterField.alert();

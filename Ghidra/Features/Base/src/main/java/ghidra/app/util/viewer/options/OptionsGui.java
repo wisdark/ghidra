@@ -37,18 +37,16 @@ import docking.widgets.indexedscrollpane.IndexedScrollPane;
 import docking.widgets.label.GDLabel;
 import generic.theme.GThemeDefaults.Colors;
 import generic.theme.GThemeDefaults.Colors.Palette;
-import generic.theme.GThemeDefaults.Colors.Tables;
 import ghidra.GhidraOptions;
 import ghidra.app.util.viewer.field.ListingColors;
 import ghidra.app.util.viewer.field.ListingColors.*;
-import ghidra.util.SystemUtilities;
 
 /**
  * Class for displaying and manipulating field colors and fonts.
  */
 public class OptionsGui extends JPanel {
 	private static final Highlight[] NO_HIGHLIGHTS = new Highlight[0];
-	private static final HighlightFactory hlFactory =
+	private static final FieldHighlightFactory hlFactory =
 		(field, text, cursorTextOffset) -> NO_HIGHLIGHTS;
 
 	// @formatter:off
@@ -134,13 +132,13 @@ public class OptionsGui extends JPanel {
 
 	/**
 	 * Constructor
-	 * 
+	 *
 	 * @param font the base font for the fields.
 	 * @param listener the listener to be notified when options change.
 	 */
 	public OptionsGui(Font font, PropertyChangeListener listener) {
 		propertyChangeListener = listener;
-		setBaseFont(SystemUtilities.adjustForFontSizeOverride(font));
+		setBaseFont(font);
 		genLayouts();
 		buildPanel();
 		fieldPanel.setBackgroundColor(BACKGROUND.getColor());
@@ -218,7 +216,7 @@ public class OptionsGui extends JPanel {
 
 	/**
 	 * callback for when the selected display field changes.
-	 * 
+	 *
 	 * @param index the index in the JList of the selected field.
 	 */
 	private void setSelectedIndex(int index) {
@@ -341,7 +339,7 @@ public class OptionsGui extends JPanel {
 	//Displays the font field with the actual fonts for easier selection
 	class FontRenderer extends GDLabel implements ListCellRenderer<String> {
 
-		private final Color SELECTED_COLOR = Palette.getColor("darkslategray");
+		private final Color SELECTED_BG_COLOR = Palette.getColor("darkslategray");
 
 		public FontRenderer() {
 			setOpaque(true);
@@ -354,8 +352,8 @@ public class OptionsGui extends JPanel {
 			Font origFont = fontNameField.getFont();
 			setFont(new Font(value.toString(), origFont.getStyle(), origFont.getSize()));
 
-			setBackground(isSelected ? SELECTED_COLOR : Colors.BACKGROUND);
-			setForeground(isSelected ? Tables.FG_SELECTED : Tables.FG_UNSELECTED);
+			setBackground(isSelected ? SELECTED_BG_COLOR : Colors.BACKGROUND);
+			setForeground(isSelected ? list.getSelectionForeground() : list.getForeground());
 
 			return this;
 		}
@@ -393,7 +391,7 @@ public class OptionsGui extends JPanel {
 	 * builds the preview panel.
 	 */
 	private JComponent buildPreviewPanel() {
-		fieldPanel = new FieldPanel(new SimpleLayoutModel());
+		fieldPanel = new FieldPanel(new SimpleLayoutModel(), "Preview");
 		IndexedScrollPane scroll = new IndexedScrollPane(fieldPanel);
 		return scroll;
 	}
@@ -736,7 +734,7 @@ public class OptionsGui extends JPanel {
 
 	/**
 	 * This listener will be notified when changes are made that need to be applied.
-	 * 
+	 *
 	 * @param listener The listener to be notified.
 	 */
 	void setOptionsPropertyChangeListener(PropertyChangeListener listener) {
@@ -775,9 +773,9 @@ public class OptionsGui extends JPanel {
 		setSelectedIndex(selectedIndex);
 	}
 
-//==================================================================================================	
+//==================================================================================================
 // Inner Classes
-//==================================================================================================	
+//==================================================================================================
 
 	/**
 	 * Simple layoutModel to be used for the preview panel.
@@ -851,7 +849,7 @@ public class OptionsGui extends JPanel {
 
 		/**
 		 * Constructor
-		 * 
+		 *
 		 * @param size the number of fields in the layout
 		 */
 		LayoutBuilder(int size) {
@@ -896,7 +894,7 @@ public class OptionsGui extends JPanel {
 		private ScreenElement screenElement;
 
 		ScreenElementTextField(ScreenElement screenElement, int startX, int length,
-				FieldElement field, HighlightFactory factory) {
+				FieldElement field, FieldHighlightFactory factory) {
 			super(startX, length, field, factory);
 			this.screenElement = screenElement;
 		}

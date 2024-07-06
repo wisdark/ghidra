@@ -17,6 +17,7 @@ package ghidra.app.util.bin.format.elf;
 
 import ghidra.app.util.bin.format.MemoryLoadable;
 import ghidra.app.util.importer.MessageLog;
+import ghidra.app.util.opinion.ElfLoaderOptionsFactory;
 import ghidra.program.model.address.Address;
 import ghidra.program.model.address.AddressRange;
 import ghidra.program.model.data.DataType;
@@ -75,7 +76,7 @@ public interface ElfLoadHelper {
 	/**
 	 * Mark this location as code in the CodeMap.
 	 * The analyzers will pick this up and disassemble the code.
-	 * @param address
+	 * @param address code memory address to be marked
 	 */
 	void markAsCode(Address address);
 
@@ -104,9 +105,13 @@ public interface ElfLoadHelper {
 			Address indirectPointerAddr);
 
 	/**
-	 * Create an undefined data item to reserve the location as data, without specifying the type
+	 * Create an undefined data item to reserve the location as data, without specifying the type.
+	 * If {@link ElfLoaderOptionsFactory#applyUndefinedSymbolData(java.util.List)} returns false
+	 * data will not be applied and null will be returned.
+	 * 
 	 * @param address  location of undefined data to create
 	 * @param length  size of the undefined data item
+	 * @return {@link Data} which was created or null if conflict occurs or disabled by option
 	 */
 	Data createUndefinedData(Address address, int length);
 
@@ -114,7 +119,7 @@ public interface ElfLoadHelper {
 	 * Create a data item using the specified data type
 	 * @param address  location of undefined data to create
 	 * @param dt data type
-	 * @return data or null if not successful
+	 * @return {@link Data} which was created or null if conflict occurs
 	 */
 	Data createData(Address address, DataType dt);
 
@@ -140,7 +145,7 @@ public interface ElfLoadHelper {
 	 * @param pinAbsolute true if address is absolute and should not change 
 	 * @param namespace symbol namespace (should generally be null for global namespace)
 	 * @return program symbol
-	 * @throws InvalidInputException
+	 * @throws InvalidInputException if an invalid name is specified
 	 */
 	Symbol createSymbol(Address addr, String name, boolean isPrimary, boolean pinAbsolute,
 			Namespace namespace) throws InvalidInputException;

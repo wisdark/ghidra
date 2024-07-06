@@ -20,13 +20,13 @@ import java.util.concurrent.CompletableFuture;
 
 import javax.swing.Icon;
 
-import ghidra.app.plugin.core.debug.DebuggerCoordinates;
+import db.Transaction;
 import ghidra.app.plugin.core.debug.gui.DebuggerResources.AutoReadMemoryAction;
 import ghidra.app.plugin.core.debug.service.emulation.ProgramEmulationUtils;
 import ghidra.app.plugin.core.debug.service.model.record.RecorderUtils;
 import ghidra.app.plugin.core.debug.utils.AbstractMappedMemoryBytesVisitor;
 import ghidra.app.services.DebuggerStaticMappingService;
-import ghidra.async.AsyncUtils;
+import ghidra.debug.api.tracemgr.DebuggerCoordinates;
 import ghidra.framework.plugintool.PluginTool;
 import ghidra.program.model.address.*;
 import ghidra.program.model.mem.MemoryAccessException;
@@ -34,10 +34,14 @@ import ghidra.trace.model.Lifespan;
 import ghidra.trace.model.Trace;
 import ghidra.trace.model.memory.TraceMemoryManager;
 import ghidra.trace.model.memory.TraceMemoryState;
-import ghidra.util.database.UndoableTransaction;
 
 public class LoadEmulatorAutoReadMemorySpec implements AutoReadMemorySpec {
-	public static final String CONFIG_NAME = "LOAD_EMULATOR";
+	public static final String CONFIG_NAME = "2_LOAD_EMULATOR";
+
+	@Override
+	public boolean equals(Object obj) {
+		return this.getClass() == obj.getClass();
+	}
 
 	@Override
 	public String getConfigName() {
@@ -55,18 +59,18 @@ public class LoadEmulatorAutoReadMemorySpec implements AutoReadMemorySpec {
 	}
 
 	@Override
-	public CompletableFuture<?> readMemory(PluginTool tool, DebuggerCoordinates coordinates,
+	public CompletableFuture<Boolean> readMemory(PluginTool tool, DebuggerCoordinates coordinates,
 			AddressSetView visible) {
 		DebuggerStaticMappingService mappingService =
 			tool.getService(DebuggerStaticMappingService.class);
 		if (mappingService == null) {
-			return AsyncUtils.NIL;
+			return CompletableFuture.completedFuture(false);
 		}
 		Trace trace = coordinates.getTrace();
 		if (trace == null || coordinates.isAlive() ||
 			!ProgramEmulationUtils.isEmulatedProgram(trace)) {
 			// Never interfere with a live target
-			return AsyncUtils.NIL;
+			return CompletableFuture.completedFuture(false);
 		}
 		TraceMemoryManager mm = trace.getMemoryManager();
 		AddressSet toRead = new AddressSet(RecorderUtils.INSTANCE.quantize(12, visible));
@@ -80,12 +84,12 @@ public class LoadEmulatorAutoReadMemorySpec implements AutoReadMemorySpec {
 		}
 
 		if (toRead.isEmpty()) {
-			return AsyncUtils.NIL;
+			return CompletableFuture.completedFuture(false);
 		}
 
 		long snap = coordinates.getSnap();
 		ByteBuffer buf = ByteBuffer.allocate(4096);
-		try (UndoableTransaction tid = UndoableTransaction.start(trace, "Load Visible")) {
+		try (Transaction tx = trace.openTransaction("Load Visible")) {
 			new AbstractMappedMemoryBytesVisitor(mappingService, buf.array()) {
 				@Override
 				protected void visitData(Address hostAddr, byte[] data, int size) {
@@ -94,7 +98,7 @@ public class LoadEmulatorAutoReadMemorySpec implements AutoReadMemorySpec {
 					mm.putBytes(snap, hostAddr, buf);
 				}
 			}.visit(trace, snap, toRead);
-			return AsyncUtils.NIL;
+			return CompletableFuture.completedFuture(true);
 		}
 		catch (MemoryAccessException e) {
 			throw new AssertionError(e);

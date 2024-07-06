@@ -17,100 +17,102 @@ package ghidra.app.util.pdb.pdbapplicator;
 
 import ghidra.app.util.SymbolPath;
 import ghidra.app.util.SymbolPathParser;
-import ghidra.app.util.bin.format.pdb2.pdbreader.PdbException;
 import ghidra.app.util.bin.format.pdb2.pdbreader.RecordNumber;
 import ghidra.app.util.bin.format.pdb2.pdbreader.type.AbstractComplexMsType;
 import ghidra.app.util.pdb.PdbNamespaceUtils;
-import ghidra.program.model.data.DataType;
+import ghidra.util.Msg;
+import mdemangler.*;
+import mdemangler.datatype.MDDataType;
 
 /**
  * Applier for {@link AbstractComplexMsType} types.
  */
-public abstract class AbstractComplexTypeApplier extends MsTypeApplier {
+public abstract class AbstractComplexTypeApplier extends MsDataTypeApplier {
 
-	protected SymbolPath symbolPath;
-	protected SymbolPath fixedSymbolPath;
-
-	protected AbstractComplexTypeApplier definitionApplier = null;
-	protected AbstractComplexTypeApplier forwardReferenceApplier = null;
-
-	public static AbstractComplexTypeApplier getComplexApplier(DefaultPdbApplicator applicator,
-			RecordNumber recordNumber) throws PdbException {
-		return (AbstractComplexTypeApplier) applicator.getApplierSpec(recordNumber,
-			AbstractComplexTypeApplier.class);
+	// Intended for: AbstractComplexMsType
+	/**
+	 * Constructor for complex type applier
+	 * @param applicator {@link DefaultPdbApplicator} for which this class is working
+	 */
+	public AbstractComplexTypeApplier(DefaultPdbApplicator applicator) {
+		super(applicator);
 	}
 
 	/**
-	 * Constructor for complex type applier.
-	 * @param applicator {@link DefaultPdbApplicator} for which this class is working.
-	 * @param msType {@link AbstractComplexMsType} to process.
+	 * Returns the SymbolPath for the complex type parameter without using the record number
+	 * @param type the MS complex PDB type
+	 * @return the path
+	 * @see #getFixedSymbolPath(AbstractComplexMsType type)
 	 */
-	public AbstractComplexTypeApplier(DefaultPdbApplicator applicator, AbstractComplexMsType msType) {
-		super(applicator, msType);
-		String fullPathName = msType.getName();
-		symbolPath = new SymbolPath(SymbolPathParser.parse(fullPathName));
-	}
-
-	SymbolPath getSymbolPath() {
+	SymbolPath getSymbolPath(AbstractComplexMsType type) {
+		SymbolPath symbolPath = null;
+		// We added logic to check the mangled name first because we found some LLVM "lambda"
+		//  symbols where the regular name was a generic "<lambda_0>" with a namespace, but this
+		//  often had a member that also lambda that was marked with the exact same namespace/name
+		//  as the containing structure.  We found that the mangled names had more accurate and
+		//  distinguished lambda numbers.
+		String mangledName = type.getMangledName();
+		if (mangledName != null) {
+			symbolPath = getSymbolPathFromMangledTypeName(mangledName);
+		}
+		if (symbolPath == null) {
+			String fullPathName = type.getName();
+			symbolPath = new SymbolPath(SymbolPathParser.parse(fullPathName));
+		}
 		return symbolPath;
 	}
 
-	boolean isForwardReference() {
-		return ((AbstractComplexMsType) msType).getMsProperty().isForwardReference();
+	/**
+	 * Returns the definition record for the specified complex type in case the record passed
+	 *  in is only its forward reference
+	 * @param mType the MS complex PDB type
+	 * @param type the derivative complex type class
+	 * @param <T> the derivative class template argument
+	 * @return the path
+	 */
+	public <T extends AbstractComplexMsType> T getDefinitionType(AbstractComplexMsType mType,
+			Class<T> type) {
+		mType = applicator.getMappedTypeRecord(mType.getRecordNumber(), type);
+		return type.cast(mType);
 	}
 
-	boolean isNested() {
-		return ((AbstractComplexMsType) msType).getMsProperty().isNestedClass();
+	/**
+	 * Returns the SymbolPath for the complex type.  This ensures that the SymbolPath pertains
+	 *  to the definition type in situations where the record number of the definition (vs. that
+	 *  of the forward reference) is needed for creation of the path
+	 * @param type the MS complex PDB type
+	 * @return the path
+	 */
+	//return mine or my def's (and set mine)
+	SymbolPath getFixedSymbolPath(AbstractComplexMsType type) {
+		SymbolPath path = getSymbolPath(type);
+		RecordNumber mappedNumber = applicator.getMappedRecordNumber(type.getRecordNumber());
+		Integer num = mappedNumber.getNumber();
+		return PdbNamespaceUtils.convertToGhidraPathName(path, num);
 	}
 
-	boolean isFinal() {
-		return ((AbstractComplexMsType) msType).getMsProperty().isSealed();
-	}
-
-	void setForwardReferenceApplier(AbstractComplexTypeApplier forwardReferenceApplier) {
-		this.forwardReferenceApplier = forwardReferenceApplier;
-	}
-
-	void setDefinitionApplier(AbstractComplexTypeApplier definitionApplier) {
-		this.definitionApplier = definitionApplier;
-	}
-
-	<T extends AbstractComplexTypeApplier> T getDefinitionApplier(Class<T> typeClass) {
-		if (!typeClass.isInstance(definitionApplier)) {
-			return null;
+	private SymbolPath getSymbolPathFromMangledTypeName(String mangledString) {
+		MDMang demangler = new MDMangGhidra();
+		try {
+			MDDataType mdDataType = demangler.demangleType(mangledString, true);
+			// 20240626:  Ultimately, it might be better to retrieve the Demangled-type to pass
+			// to the DemangledObject.createNamespace() method to convert to a true Ghidra
+			// Namespace that are flagged as functions (not capable at this time) or types or
+			// raw namespace nodes.  Note, however, that the  Demangler is still weak in this
+			// area as there are codes that we still not know how to interpret.
+			return MDMangUtils.getSymbolPath(mdDataType);
+			// Could consider the following simplification method instead
+			// return MDMangUtils.getSimpleSymbolPath(mdDataType);
 		}
-		return typeClass.cast(definitionApplier);
-	}
-
-	protected AbstractComplexTypeApplier getAlternativeTypeApplier() {
-		if (isForwardReference()) {
-			return definitionApplier;
+		catch (MDException e) {
+			// Couldn't demangle.
+			// Message might cause too much noise (we have a fallback, above, to use the regular
+			// name, but this could cause an error... see the notes above about why a mangled
+			// name is checked first).
+			Msg.info(this,
+				"PDB issue dmangling type name: " + e.getMessage() + " for : " + mangledString);
 		}
-		return forwardReferenceApplier;
-	}
-
-	protected SymbolPath getFixedSymbolPath() { //return mine or my def's (and set mine)
-		if (fixedSymbolPath != null) {
-			return fixedSymbolPath;
-		}
-
-		if (definitionApplier != null && definitionApplier.getFixedSymbolPath() != null) {
-			fixedSymbolPath = definitionApplier.getFixedSymbolPath();
-			return fixedSymbolPath;
-		}
-
-		SymbolPath fixed = PdbNamespaceUtils.convertToGhidraPathName(symbolPath, index);
-		if (symbolPath.equals(fixed)) {
-			fixedSymbolPath = symbolPath;
-		}
-		else {
-			fixedSymbolPath = fixed;
-		}
-		return fixedSymbolPath;
-	}
-
-	DataType getDataTypeInternal() {
-		return dataType;
+		return null;
 	}
 
 }

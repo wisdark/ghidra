@@ -34,6 +34,7 @@ import javax.swing.tree.*;
 
 import org.junit.Assert;
 
+import ghidra.framework.ApplicationConfiguration;
 import ghidra.util.*;
 import ghidra.util.datastruct.WeakSet;
 import ghidra.util.exception.AssertException;
@@ -48,6 +49,18 @@ import utility.function.ExceptionalCallback;
  * should use AbstractGenericTest instead
  */
 public class AbstractGuiTest extends AbstractGenericTest {
+
+	@Override
+	protected ApplicationConfiguration createApplicationConfiguration() {
+		// A simple way to signal that Gui tests are not headless
+		return new ApplicationConfiguration() {
+			@Override
+			public boolean isHeadless() {
+				return false;
+			}
+		};
+	}
+
 	/**
 	 * Gets all windows in the system (including Frames).
 	 *
@@ -90,10 +103,10 @@ public class AbstractGuiTest extends AbstractGenericTest {
 	 *             for tasks
 	 */
 	public static void waitForTasks() {
-		doWaitForTasks(PRIVATE_LONG_WAIT_TIMEOUT);
+		waitForTasks(PRIVATE_LONG_WAIT_TIMEOUT);
 	}
 
-	private static void doWaitForTasks(long timeout) {
+	public static void waitForTasks(long timeout) {
 		waitForSwing();
 
 		long time = 0;
@@ -109,11 +122,10 @@ public class AbstractGuiTest extends AbstractGenericTest {
 		waitForSwing();
 	}
 
-	// TODO deprecate this; at time of writing there are 1174 references; wait until it is
-	//      a more reasonable number
-	//
-	//      Update: 744 references at 12/1/19
-	//      Update: 559 references at 12/4/20
+	/**
+	 * @deprecated Use {@link #waitForSwing()} instead
+	 */
+	@Deprecated(forRemoval = true, since = "10.3")
 	public static void waitForPostedSwingRunnables() {
 		waitForSwing();
 	}
@@ -358,29 +370,6 @@ public class AbstractGuiTest extends AbstractGenericTest {
 		return null;
 	}
 
-	public static List<Component> findComponentsByName(Container container, String componentName,
-			boolean checkOwnedWindows) {
-
-		List<Component> retList = new ArrayList<>();
-
-		Component[] components = container.getComponents();
-		for (Component component : components) {
-			if (component == null) {
-				continue;
-			}
-			String name = component.getName();
-			if (name != null && name.equals(componentName)) {
-				retList.add(component);
-			}
-			else if (component instanceof Container) {
-				retList.addAll(
-					findComponentsByName((Container) component, componentName, checkOwnedWindows));
-			}
-
-		}
-		return retList;
-	}
-
 	public static JButton findButtonByIcon(Container container, Icon icon) {
 		Component[] comps = container.getComponents();
 		for (Component element : comps) {
@@ -430,6 +419,18 @@ public class AbstractGuiTest extends AbstractGenericTest {
 	}
 
 	/**
+	 * Searches the sub-components of the given container and returns the AbstractButton that has 
+	 * the specified name.
+	 *
+	 * @param container container to search
+	 * @param name the button name
+	 * @return null if the button was not found
+	 */
+	public static AbstractButton findButtonByName(Container container, String name) {
+		return findAbstractButtonByName(container, name);
+	}
+
+	/**
 	 * Searches the sub-components of the given container and returns the
 	 * AbstractButton that has the specified text.
 	 * <p>
@@ -470,7 +471,6 @@ public class AbstractGuiTest extends AbstractGenericTest {
 	 * @return null if the button was not found
 	 */
 	public static AbstractButton findAbstractButtonByName(Container container, String name) {
-
 		Component[] comp = container.getComponents();
 		for (Component element : comp) {
 			if ((element instanceof AbstractButton) &&
@@ -661,10 +661,24 @@ public class AbstractGuiTest extends AbstractGenericTest {
 	 * @param s the supplier
 	 * @return the value returned by the supplier
 	 */
-	public static <T> T runSwing(Supplier<T> s) {
+	public static <T> T getSwing(Supplier<T> s) {
 		AtomicReference<T> ref = new AtomicReference<>();
 		runSwing(() -> ref.set(s.get()));
 		return ref.get();
+	}
+
+	/**
+	 * Returns the value from the given {@link Supplier}, invoking the call in
+	 * the Swing thread. This is useful when you may have values that are being
+	 * changed on the Swing thread and you need the test thread to see the
+	 * changes.
+	 *
+	 * @param s the supplier
+	 * @return the value returned by the supplier
+	 * @see #getSwing(Supplier)
+	 */
+	public static <T> T runSwing(Supplier<T> s) {
+		return getSwing(s);
 	}
 
 	/**
@@ -1110,8 +1124,8 @@ public class AbstractGuiTest extends AbstractGenericTest {
 		if (expected.getRGB() == actual.getRGB()) {
 			return;
 		}
-		fail("Expected: [" + expected.getClass().getSimpleName() + "]" + expected +
-			", but got: [" + actual.getClass().getSimpleName() + "]" + actual);
+		fail("Expected: [" + expected.getClass().getSimpleName() + "]" + expected + ", but got: [" +
+			actual.getClass().getSimpleName() + "]" + actual);
 	}
 
 	public static void printMemory() {
@@ -1269,7 +1283,7 @@ public class AbstractGuiTest extends AbstractGenericTest {
 	 *             infrastructure method.
 	 */
 	@Deprecated
-	public static void privateWaitForPostedSwingRunnables_SwingSafe() {
+	public static void privatewaitForSwing_SwingSafe() {
 		yieldToSwing();
 	}
 

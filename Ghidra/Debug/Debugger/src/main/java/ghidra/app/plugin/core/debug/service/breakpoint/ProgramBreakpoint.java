@@ -19,7 +19,9 @@ import java.util.*;
 
 import com.google.gson.*;
 
-import ghidra.app.services.LogicalBreakpoint.ProgramMode;
+import db.Transaction;
+import ghidra.debug.api.breakpoint.LogicalBreakpoint;
+import ghidra.debug.api.breakpoint.LogicalBreakpoint.ProgramMode;
 import ghidra.program.model.address.Address;
 import ghidra.program.model.address.AddressSet;
 import ghidra.program.model.listing.*;
@@ -27,7 +29,6 @@ import ghidra.program.util.ProgramLocation;
 import ghidra.trace.model.breakpoint.TraceBreakpointKind;
 import ghidra.trace.model.breakpoint.TraceBreakpointKind.TraceBreakpointKindSet;
 import ghidra.util.Msg;
-import ghidra.util.database.UndoableTransaction;
 import ghidra.util.exception.CancelledException;
 import ghidra.util.task.TaskMonitor;
 
@@ -194,8 +195,7 @@ public class ProgramBreakpoint {
 	}
 
 	private void writeProperties(Bookmark bookmark) {
-		try (UndoableTransaction tid =
-			UndoableTransaction.start(program, "Rename breakpoint")) {
+		try (Transaction tx = program.openTransaction("Rename breakpoint")) {
 			bookmark.set(bookmark.getCategory(), computeComment());
 		}
 		catch (ConcurrentModificationException e) {
@@ -297,7 +297,7 @@ public class ProgramBreakpoint {
 		// volatile reads
 		Bookmark eBookmark = this.eBookmark;
 		Bookmark dBookmark = this.dBookmark;
-		try (UndoableTransaction tid = UndoableTransaction.start(program, "Clear breakpoint")) {
+		try (Transaction tx = program.openTransaction("Clear breakpoint")) {
 			BookmarkManager bookmarkManager = program.getBookmarkManager();
 			if (eBookmark != null) {
 				bookmarkManager.removeBookmark(eBookmark);
@@ -353,8 +353,7 @@ public class ProgramBreakpoint {
 	 * @return true if this changed the breakpoint state
 	 */
 	public boolean add(Bookmark bookmark) {
-		if (LogicalBreakpointInternal.BREAKPOINT_ENABLED_BOOKMARK_TYPE
-				.equals(bookmark.getTypeString())) {
+		if (LogicalBreakpoint.ENABLED_BOOKMARK_TYPE.equals(bookmark.getTypeString())) {
 			if (eBookmark == bookmark) {
 				return false;
 			}
@@ -362,8 +361,7 @@ public class ProgramBreakpoint {
 			syncProperties(bookmark);
 			return true;
 		}
-		if (LogicalBreakpointInternal.BREAKPOINT_DISABLED_BOOKMARK_TYPE
-				.equals(bookmark.getTypeString())) {
+		if (LogicalBreakpoint.DISABLED_BOOKMARK_TYPE.equals(bookmark.getTypeString())) {
 			if (dBookmark == bookmark) {
 				return false;
 			}
@@ -452,13 +450,12 @@ public class ProgramBreakpoint {
 	 */
 	public void toggleWithComment(boolean enabled, String comment) {
 		String addType =
-			enabled ? LogicalBreakpointInternal.BREAKPOINT_ENABLED_BOOKMARK_TYPE
-					: LogicalBreakpointInternal.BREAKPOINT_DISABLED_BOOKMARK_TYPE;
+			enabled ? LogicalBreakpoint.ENABLED_BOOKMARK_TYPE
+					: LogicalBreakpoint.DISABLED_BOOKMARK_TYPE;
 		String delType =
-			enabled ? LogicalBreakpointInternal.BREAKPOINT_DISABLED_BOOKMARK_TYPE
-					: LogicalBreakpointInternal.BREAKPOINT_ENABLED_BOOKMARK_TYPE;
-		try (UndoableTransaction tid =
-			UndoableTransaction.start(program, "Enable breakpoint")) {
+			enabled ? LogicalBreakpoint.DISABLED_BOOKMARK_TYPE
+					: LogicalBreakpoint.ENABLED_BOOKMARK_TYPE;
+		try (Transaction tx = program.openTransaction("Toggle breakpoint")) {
 			BookmarkManager manager = program.getBookmarkManager();
 			String catStr = computeCategory();
 			manager.setBookmark(address, addType, catStr, comment);

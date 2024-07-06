@@ -103,6 +103,7 @@ public class DialogComponentProvider
 	private boolean isTransient = false;
 
 	private Dimension defaultSize;
+	private String accessibleDescription;
 
 	/**
 	 * Constructor for a DialogComponentProvider that will be modal and will include a status line and
@@ -639,6 +640,15 @@ public class DialogComponentProvider
 		Swing.runIfSwingOrRunLater(() -> doSetStatusText(text, type, alert));
 	}
 
+	/**
+	 * Sets a description of the dialog that will be read by screen readers when the dialog
+	 * is made visible.
+	 * @param description a description of the dialog
+	 */
+	public void setAccessibleDescription(String description) {
+		this.accessibleDescription = description;
+	}
+
 	private void doSetStatusText(String text, MessageType type, boolean alert) {
 
 		SystemUtilities
@@ -790,15 +800,10 @@ public class DialogComponentProvider
 	 * If the status message fits then there is no tool tip.
 	 */
 	private void updateStatusToolTip() {
-		String text = statusLabel.getText();
-		// Get the width of the message.
-		FontMetrics fm = statusLabel.getFontMetrics(statusLabel.getFont());
-		int messageWidth = 0;
-		if ((fm != null) && (text != null)) {
-			messageWidth = fm.stringWidth(text);
-		}
-		if (messageWidth > statusLabel.getWidth()) {
-			statusLabel.setToolTipText(text);
+		Dimension preferredSize = statusLabel.getPreferredSize();
+		Dimension size = statusLabel.getSize();
+		if (preferredSize.width > size.width || preferredSize.height > size.height) {
+			statusLabel.setToolTipText(statusLabel.getOriginalText());
 		}
 		else {
 			statusLabel.setToolTipText(null);
@@ -1096,6 +1101,9 @@ public class DialogComponentProvider
 
 	void setDialog(DockingDialog dialog) {
 		this.dialog = dialog;
+		if (dialog != null) {
+			dialog.getAccessibleContext().setAccessibleDescription(accessibleDescription);
+		}
 	}
 
 	DockingDialog getDialog() {
@@ -1177,14 +1185,14 @@ public class DialogComponentProvider
 		}
 
 		if (event == null) {
-			return new ActionContext(null, c);
+			return new DefaultActionContext(null, c);
 		}
 
 		Component sourceComponent = event.getComponent();
 		if (sourceComponent != null) {
 			c = sourceComponent;
 		}
-		return new ActionContext(null, c).setSourceObject(event.getSource());
+		return new DefaultActionContext(null, c).setSourceObject(event.getSource());
 	}
 
 	/**
@@ -1194,7 +1202,7 @@ public class DialogComponentProvider
 	protected void notifyContextChanged() {
 		ActionContext context = getActionContext(null);
 		if (context == null) {
-			context = new ActionContext();
+			context = new DefaultActionContext();
 		}
 		Set<DockingActionIf> keySet = actionMap.keySet();
 		for (DockingActionIf action : keySet) {

@@ -23,6 +23,7 @@ import java.util.stream.Collectors;
 import agent.gdb.manager.*;
 import agent.gdb.manager.impl.cmd.GdbStateChangeRecord;
 import ghidra.async.AsyncUtils;
+import ghidra.dbg.DebuggerObjectModel.RefreshBehavior;
 import ghidra.dbg.agent.DefaultTargetObject;
 import ghidra.dbg.error.DebuggerIllegalArgumentException;
 import ghidra.dbg.target.TargetConfigurable;
@@ -106,17 +107,12 @@ public class GdbModelTargetInferiorContainer
 	@Override
 	public void libraryLoaded(GdbInferior inf, String name, GdbCause cause) {
 		GdbModelTargetInferior inferior = getTargetInferior(inf);
-		GdbModelTargetModule module = inferior.modules.libraryLoaded(name);
-		broadcast().event(parent, null, TargetEventType.MODULE_LOADED,
-			"Library " + name + " loaded", List.of(module));
+		inferior.modules.libraryLoaded(name);
 	}
 
 	@Override
 	public void libraryUnloaded(GdbInferior inf, String name, GdbCause cause) {
 		GdbModelTargetInferior inferior = getTargetInferior(inf);
-		GdbModelTargetModule module = inferior.modules.getTargetModuleIfPresent(name);
-		broadcast().event(parent, null, TargetEventType.MODULE_UNLOADED,
-			"Library " + name + " unloaded", List.of(module));
 		inferior.modules.libraryUnloaded(name);
 	}
 
@@ -136,10 +132,10 @@ public class GdbModelTargetInferiorContainer
 	}
 
 	@Override
-	public CompletableFuture<Void> requestElements(boolean refresh) {
-		if (!refresh) {
+	public CompletableFuture<Void> requestElements(RefreshBehavior refresh) {
+		if (!refresh.equals(RefreshBehavior.REFRESH_ALWAYS)) {
 			updateUsingInferiors(impl.gdb.getKnownInferiors());
-			return AsyncUtils.NIL;
+			return AsyncUtils.nil();
 		}
 		return impl.gdb.listInferiors().thenAccept(this::updateUsingInferiors);
 	}
@@ -190,7 +186,7 @@ public class GdbModelTargetInferiorContainer
 				}
 			default:
 		}
-		return AsyncUtils.NIL;
+		return AsyncUtils.nil();
 	}
 
 }

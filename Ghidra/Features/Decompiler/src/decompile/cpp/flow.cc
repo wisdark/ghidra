@@ -15,6 +15,8 @@
  */
 #include "flow.hh"
 
+namespace ghidra {
+
 /// Prepare for tracing flow for a new function.
 /// The Funcdata object and references to its internal containers must be explicitly given.
 /// \param d is the new function to trace
@@ -328,8 +330,7 @@ PcodeOp *FlowInfo::xrefControlFlow(list<PcodeOp *>::const_iterator oiter,bool &s
       break;
     case CPUI_CALLOTHER:
     {
-      InjectedUserOp *userop = dynamic_cast<InjectedUserOp *>(glb->userops.getOp(op->getIn(0)->getOffset()));
-      if (userop != (InjectedUserOp *)0)
+      if (glb->userops.getOp(op->getIn(0)->getOffset())->getType() == UserPcodeOp::injected)
 	injectlist.push_back(op);
       break;
     }
@@ -709,20 +710,49 @@ bool FlowInfo::setupCallindSpecs(PcodeOp *op,FuncCallSpecs *fc)
 }
 
 /// \param op is the BRANCHIND operation to convert
-/// \param failuremode is a code indicating the type of failure when trying to recover the jump table
-void FlowInfo::truncateIndirectJump(PcodeOp *op,int4 failuremode)
+/// \param mode indicates the type of failure when trying to recover the jump table
+void FlowInfo::truncateIndirectJump(PcodeOp *op,JumpTable::RecoveryMode mode)
 
 {
-  data.opSetOpcode(op,CPUI_CALLIND); // Turn jump into call
-  setupCallindSpecs(op,(FuncCallSpecs *)0);
-  if (failuremode != 2)					// Unless the switch was a thunk mechanism
-    data.getCallSpecs(op)->setBadJumpTable(true);	// Consider using special name for switch variable
+  if (mode == JumpTable::fail_return) {
+    data.opSetOpcode(op,CPUI_RETURN);	// Turn jump into return
+    data.warning("Treating indirect jump as return",op->getAddr());
+  }
+  else {
+    data.opSetOpcode(op,CPUI_CALLIND); // Turn jump into call
+    setupCallindSpecs(op,(FuncCallSpecs *)0);
+    FuncCallSpecs *fc = data.getCallSpecs(op);
+    uint4 returnType;
+    bool noParams;
 
-  // Create an artificial return
-  PcodeOp *truncop = artificialHalt(op->getAddr(),0);
-  data.opDeadInsertAfter(truncop,op);
+    if (mode == JumpTable::fail_thunk) {
+      returnType = 0;
+      noParams = false;
+    }
+    else if (mode == JumpTable::fail_callother) {
+      returnType = PcodeOp::noreturn;
+      fc->setNoReturn(true);
+      data.warning("Does not return", op->getAddr());
+      noParams = true;
+    }
+    else {
+      returnType = 0;
+      noParams = false;
+      fc->setBadJumpTable(true);		// Consider using special name for switch variable
+      data.warning("Treating indirect jump as call",op->getAddr());
+    }
+    if (noParams) {
+      if (!fc->hasModel()) {
+	fc->setInternal(glb->defaultfp, glb->types->getTypeVoid());
+	fc->setInputLock(true);
+	fc->setOutputLock(true);
+      }
+    }
 
-  data.warning("Treating indirect jump as call",op->getAddr());
+    // Create an artificial return
+    PcodeOp *truncop = artificialHalt(op->getAddr(),returnType);
+    data.opDeadInsertAfter(truncop,op);
+  }
 }
 
 /// \brief Test if the given p-code op is a member of an array
@@ -1380,9 +1410,14 @@ void FlowInfo::checkMultistageJumptables(void)
   }  
 }
 
-/// \brief Recover jumptables for current set of BRANCHIND ops using existing flow
+/// \brief Recover jumptables for the current set of BRANCHIND ops using existing flow
 ///
-/// \param newTables will hold one JumpTable pointer for each BRANCHIND in \b tablelist
+/// This method passes back a list of JumpTable objects, one for each BRANCHIND in the current
+/// \b tablelist where the jumptable can be recovered. If a particular BRANCHIND cannot be recovered
+/// because the current partial control flow cannot legally reach it, the BRANCHIND is passed back
+/// in a separate list.
+/// \param newTables will hold the list of recovered JumpTables
+/// \param notreached will hold the list of BRANCHIND ops that could not be reached
 void FlowInfo::recoverJumpTables(vector<JumpTable *> &newTables,vector<PcodeOp *> &notreached)
 
 {
@@ -1391,23 +1426,25 @@ void FlowInfo::recoverJumpTables(vector<JumpTable *> &newTables,vector<PcodeOp *
   s1 << data.getName() << "@@jump@";
   op->getAddr().printRaw(s1);
 
+  string nm = s1.str();
   // Prepare partial Funcdata object for analysis if necessary
-  Funcdata partial(s1.str(),data.getScopeLocal()->getParent(),data.getAddress(),(FunctionSymbol *)0);
+  Funcdata partial(nm,nm,data.getScopeLocal()->getParent(),data.getAddress(),(FunctionSymbol *)0);
 
   for(int4 i=0;i<tablelist.size();++i) {
     op = tablelist[i];
-    int4 failuremode;
-    JumpTable *jt = data.recoverJumpTable(partial,op,this,failuremode); // Recover it
+    JumpTable::RecoveryMode mode;
+    JumpTable *jt = data.recoverJumpTable(partial,op,this,mode); // Recover it
     if (jt == (JumpTable *)0) { // Could not recover jumptable
-      if ((failuremode == 3) && (tablelist.size() > 1) && (!isInArray(notreached,op))) {
+      if ((mode == JumpTable::fail_noflow) && (tablelist.size() > 1) && (!isInArray(notreached,op))) {
 	// If the indirect op was not reachable with current flow AND there is more flow to generate,
 	//     AND we haven't tried to recover this table before
 	notreached.push_back(op); // Save this op so we can try to recovery table again later
       }
       else if (!isFlowForInline())	// Unless this flow is being inlined for something else
-	truncateIndirectJump(op,failuremode); // Treat the indirect jump as a call
+	truncateIndirectJump(op,mode); // Treat the indirect jump as a call
     }
     newTables.push_back(jt);
   }
 }
 
+} // End namespace ghidra

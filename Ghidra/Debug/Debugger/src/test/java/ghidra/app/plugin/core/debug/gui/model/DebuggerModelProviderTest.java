@@ -18,40 +18,41 @@ package ghidra.app.plugin.core.debug.gui.model;
 import static org.junit.Assert.*;
 
 import java.awt.event.MouseEvent;
-import java.util.List;
-import java.util.Set;
+import java.util.*;
+import java.util.stream.*;
 
 import org.jdom.JDOMException;
 import org.junit.*;
 
-import docking.widgets.table.DynamicTableColumn;
-import docking.widgets.table.GDynamicColumnTableModel;
+import db.Transaction;
+import docking.ActionContext;
+import docking.widgets.table.*;
+import docking.widgets.table.ColumnSortState.SortDirection;
 import docking.widgets.tree.GTree;
 import docking.widgets.tree.GTreeNode;
 import docking.widgets.tree.support.GTreeSelectionEvent.EventOrigin;
 import generic.Unique;
-import ghidra.app.plugin.core.debug.DebuggerCoordinates;
-import ghidra.app.plugin.core.debug.gui.AbstractGhidraHeadedDebuggerGUITest;
+import ghidra.app.plugin.core.debug.gui.AbstractGhidraHeadedDebuggerTest;
 import ghidra.app.plugin.core.debug.gui.model.ObjectTableModel.PrimitiveRow;
 import ghidra.app.plugin.core.debug.gui.model.ObjectTableModel.ValueRow;
 import ghidra.app.plugin.core.debug.gui.model.ObjectTreeModel.AbstractNode;
 import ghidra.app.plugin.core.debug.gui.model.PathTableModel.PathRow;
-import ghidra.app.plugin.core.debug.gui.model.columns.TraceValueValColumn;
+import ghidra.app.plugin.core.debug.gui.model.columns.*;
 import ghidra.dbg.target.TargetEventScope;
 import ghidra.dbg.target.TargetObject;
 import ghidra.dbg.target.schema.SchemaContext;
 import ghidra.dbg.target.schema.TargetObjectSchema.SchemaName;
 import ghidra.dbg.target.schema.XmlSchemaContext;
+import ghidra.debug.api.tracemgr.DebuggerCoordinates;
 import ghidra.trace.model.Lifespan;
 import ghidra.trace.model.target.*;
 import ghidra.trace.model.target.TraceObject.ConflictResolution;
 import ghidra.trace.model.thread.TraceObjectThread;
 import ghidra.trace.model.thread.TraceThread;
-import ghidra.util.database.UndoableTransaction;
 
-public class DebuggerModelProviderTest extends AbstractGhidraHeadedDebuggerGUITest {
+public class DebuggerModelProviderTest extends AbstractGhidraHeadedDebuggerTest {
 
-	protected static final SchemaContext CTX;
+	public static final SchemaContext CTX;
 
 	static {
 		try {
@@ -66,6 +67,8 @@ public class DebuggerModelProviderTest extends AbstractGhidraHeadedDebuggerGUITe
 					        <element schema='Process' />
 					    </schema>
 					    <schema name='Process' elementResync='NEVER' attributeResync='ONCE'>
+					        <interface name='Process' />
+					        <interface name='Activatable' />
 					        <attribute name='Threads' schema='ThreadContainer' />
 					        <attribute name='Handles' schema='HandleContainer' />
 					    </schema>
@@ -75,6 +78,7 @@ public class DebuggerModelProviderTest extends AbstractGhidraHeadedDebuggerGUITe
 					    </schema>
 					    <schema name='Thread' elementResync='NEVER' attributeResync='NEVER'>
 					        <interface name='Thread' />
+					        <interface name='Activatable' />
 					        <attribute name='_display' schema='STRING' />
 					        <attribute name='_self' schema='Thread' />
 					        <attribute name='Stack' schema='Stack' />
@@ -86,6 +90,7 @@ public class DebuggerModelProviderTest extends AbstractGhidraHeadedDebuggerGUITe
 					    </schema>
 					    <schema name='Frame' elementResync='NEVER' attributeResync='NEVER'>
 					        <interface name='StackFrame' />
+					        <interface name='Activatable' />
 					    </schema>
 					    <schema name='HandleContainer' canonical='yes' elementResync='NEVER'
 					            attributeResync='ONCE'>
@@ -117,6 +122,7 @@ public class DebuggerModelProviderTest extends AbstractGhidraHeadedDebuggerGUITe
 	public void setUpModelProviderTest() throws Exception {
 		modelPlugin = addPlugin(tool, DebuggerModelPlugin.class);
 		modelProvider = waitForComponentProvider(DebuggerModelProvider.class);
+		modelProvider.setLimitToCurrentSnap(false);
 	}
 
 	@After
@@ -130,14 +136,14 @@ public class DebuggerModelProviderTest extends AbstractGhidraHeadedDebuggerGUITe
 	}
 
 	protected void populateSnapshots() throws Throwable {
-		try (UndoableTransaction tid = tb.startTransaction()) {
+		try (Transaction tx = tb.startTransaction()) {
 			tb.trace.getTimeManager().getSnapshot(20, true);
 		}
 	}
 
 	protected TraceObjectValue createSessionObject() throws Throwable {
 		TraceObjectManager objects = tb.trace.getObjectManager();
-		try (UndoableTransaction tid = tb.startTransaction()) {
+		try (Transaction tx = tb.startTransaction()) {
 			return objects.createRootObject(CTX.getSchema(new SchemaName("Session")));
 		}
 	}
@@ -162,7 +168,7 @@ public class DebuggerModelProviderTest extends AbstractGhidraHeadedDebuggerGUITe
 	}
 
 	protected TraceObject createStack(TraceObject thread) {
-		try (UndoableTransaction tid = tb.startTransaction()) {
+		try (Transaction tx = tb.startTransaction()) {
 			TraceObjectKeyPath stackPath = thread.getCanonicalPath().key("Stack");
 			TraceObjectManager objects = tb.trace.getObjectManager();
 			TraceObject stack = objects.createObject(stackPath);
@@ -175,7 +181,7 @@ public class DebuggerModelProviderTest extends AbstractGhidraHeadedDebuggerGUITe
 	}
 
 	protected void populateThreads() throws Throwable {
-		try (UndoableTransaction tid = tb.startTransaction()) {
+		try (Transaction tx = tb.startTransaction()) {
 			TraceObject prevThread = null;
 			for (long i = 0; i < 10; i++) {
 				TraceObject thread = createThread(i, prevThread);
@@ -186,7 +192,7 @@ public class DebuggerModelProviderTest extends AbstractGhidraHeadedDebuggerGUITe
 
 	protected void addThread10() throws Throwable {
 		TraceObjectManager objects = tb.trace.getObjectManager();
-		try (UndoableTransaction tid = tb.startTransaction()) {
+		try (Transaction tx = tb.startTransaction()) {
 			createThread(10, objects.getObjectByCanonicalPath(
 				TraceObjectKeyPath.parse("Processes[0].Threads[9]")));
 		}
@@ -194,7 +200,7 @@ public class DebuggerModelProviderTest extends AbstractGhidraHeadedDebuggerGUITe
 
 	protected void populateHandles() throws Throwable {
 		TraceObjectManager objects = tb.trace.getObjectManager();
-		try (UndoableTransaction tid = tb.startTransaction()) {
+		try (Transaction tx = tb.startTransaction()) {
 			TraceObject handleContainer =
 				objects.createObject(TraceObjectKeyPath.parse("Processes[0].Handles"));
 			handleContainer.insert(Lifespan.nowOn(0), ConflictResolution.DENY);
@@ -208,7 +214,7 @@ public class DebuggerModelProviderTest extends AbstractGhidraHeadedDebuggerGUITe
 	protected void populateLinks() throws Throwable {
 		TraceObjectManager objects = tb.trace.getObjectManager();
 		TraceObjectKeyPath threadContainerPath = TraceObjectKeyPath.parse("Processes[0].Threads");
-		try (UndoableTransaction tid = tb.startTransaction()) {
+		try (Transaction tx = tb.startTransaction()) {
 			TraceObject linkContainer =
 				objects.createObject(TraceObjectKeyPath.parse("Processes[0].Links"));
 			linkContainer.insert(Lifespan.nowOn(0), ConflictResolution.DENY);
@@ -221,7 +227,7 @@ public class DebuggerModelProviderTest extends AbstractGhidraHeadedDebuggerGUITe
 
 	protected void populateBoxedPrimitive() throws Throwable {
 		TraceObjectManager objects = tb.trace.getObjectManager();
-		try (UndoableTransaction tid = tb.startTransaction()) {
+		try (Transaction tx = tb.startTransaction()) {
 			TraceObject boxed =
 				objects.createObject(TraceObjectKeyPath.parse("Processes[0].Boxed"));
 			boxed.insert(Lifespan.nowOn(0), ConflictResolution.DENY);
@@ -343,12 +349,12 @@ public class DebuggerModelProviderTest extends AbstractGhidraHeadedDebuggerGUITe
 	}
 
 	@Test
-	public void testSetPathNoExist() throws Throwable {
+	public void testActivatePathNoExist() throws Throwable {
 		createTraceAndPopulateObjects();
 
 		traceManager.activateTrace(tb.trace);
 		waitForSwing();
-		modelProvider.setPath(TraceObjectKeyPath.parse("Processes[0].NoSuch"));
+		modelProvider.activatePath(TraceObjectKeyPath.parse("Processes[0].NoSuch"));
 		waitForTasks();
 
 		assertEquals("No such object at path Processes[0].NoSuch", tool.getStatusInfo());
@@ -363,9 +369,17 @@ public class DebuggerModelProviderTest extends AbstractGhidraHeadedDebuggerGUITe
 		modelProvider.setPath(TraceObjectKeyPath.parse("Processes[0].Handles"));
 		waitForTasks();
 
+		int keyColIndex =
+			waitForValue(() -> findColumnOfClass(modelProvider.elementsTablePanel.tableModel,
+				TraceValueKeyColumn.class));
 		int valColIndex =
 			waitForValue(() -> findColumnOfClass(modelProvider.elementsTablePanel.tableModel,
 				TraceValueValColumn.class));
+
+		TableSortStateEditor sortEditor = new TableSortStateEditor();
+		sortEditor.addSortedColumn(keyColIndex, SortDirection.ASCENDING);
+		modelProvider.elementsTablePanel.tableModel
+				.setTableSortState(sortEditor.createTableSortState());
 
 		waitForPass(() -> {
 			for (int i = 0; i < 10; i++) {
@@ -399,24 +413,26 @@ public class DebuggerModelProviderTest extends AbstractGhidraHeadedDebuggerGUITe
 
 		TraceObjectManager objects = tb.trace.getObjectManager();
 		TraceObject root = objects.getRootObject();
-		TraceObjectKeyPath processesPath = TraceObjectKeyPath.parse("Processes");
-		TraceObject processes = objects.getObjectByCanonicalPath(processesPath);
+		TraceObjectKeyPath process0Path = TraceObjectKeyPath.parse("Processes[0]");
+		TraceObject process0 = objects.getObjectByCanonicalPath(process0Path);
 		traceManager.activateObject(root);
 		waitForTasks();
 
-		modelProvider.setTreeSelection(processesPath, EventOrigin.USER_GENERATED);
+		modelProvider.setTreeSelection(process0Path, EventOrigin.USER_GENERATED);
 		waitForSwing();
 
 		GTree tree = modelProvider.objectsTreePanel.tree;
 		GTreeNode node = waitForPass(() -> {
 			GTreeNode n = Unique.assertOne(tree.getSelectedNodes());
-			assertEquals("Processes", n.getName());
+			assertEquals(
+				"[0]@%d".formatted(System.identityHashCode(process0.getCanonicalParent(0))),
+				n.getName());
 			return n;
 		});
 		clickTreeNode(tree, node, MouseEvent.BUTTON1);
 		clickTreeNode(tree, node, MouseEvent.BUTTON1);
 		waitForSwing();
-		waitForPass(() -> assertEquals(processes, traceManager.getCurrentObject()));
+		waitForPass(() -> assertEquals(process0, traceManager.getCurrentObject()));
 	}
 
 	@Test
@@ -557,8 +573,8 @@ public class DebuggerModelProviderTest extends AbstractGhidraHeadedDebuggerGUITe
 		});
 		clickTableCell(modelProvider.attributesTablePanel.table, rowIndex, 0, 2);
 
-		assertEquals(TraceObjectKeyPath.parse("Processes[0].Threads"),
-			traceManager.getCurrentObject().getCanonicalPath());
+		// ThreadContainer is not activatable, so only changes provider's path
+		assertEquals(TraceObjectKeyPath.parse("Processes[0].Threads"), modelProvider.getPath());
 	}
 
 	@Test
@@ -630,8 +646,10 @@ public class DebuggerModelProviderTest extends AbstractGhidraHeadedDebuggerGUITe
 		selectAttribute("_next");
 		waitForSwing();
 
-		assertEnabled(modelProvider, modelProvider.actionFollowLink);
-		performAction(modelProvider.actionFollowLink, modelProvider, true);
+		ActionContext ctx =
+			runSwing(() -> modelProvider.attributesTableListener.computeContext(true));
+		assertTrue(runSwing(() -> modelProvider.actionFollowLink.isEnabledForContext(ctx)));
+		performAction(modelProvider.actionFollowLink, ctx, true);
 
 		TraceObjectKeyPath thread3Path = TraceObjectKeyPath.parse("Processes[0].Threads[3]");
 		assertPathIs(thread3Path, 0, 5);
@@ -645,6 +663,9 @@ public class DebuggerModelProviderTest extends AbstractGhidraHeadedDebuggerGUITe
 		waitForSwing();
 		modelProvider.setPath(TraceObjectKeyPath.parse("Processes[0].Threads[2]"));
 		waitForTasks();
+
+		// Pre-check
+		assertEquals(TraceObjectKeyPath.parse("Processes[0].Threads[2]"), modelProvider.path);
 
 		performAction(modelProvider.actionCloneWindow);
 
@@ -684,7 +705,7 @@ public class DebuggerModelProviderTest extends AbstractGhidraHeadedDebuggerGUITe
 
 		assertPathIs(path, 0, 3);
 
-		try (UndoableTransaction tid = tb.startTransaction()) {
+		try (Transaction tx = tb.startTransaction()) {
 			TraceObject thread = tb.trace.getObjectManager().getObjectByCanonicalPath(path);
 			thread.setAttribute(Lifespan.nowOn(0), "NewAttribute", 11);
 		}
@@ -705,7 +726,7 @@ public class DebuggerModelProviderTest extends AbstractGhidraHeadedDebuggerGUITe
 
 		assertPathIsThreadsContainer();
 
-		try (UndoableTransaction tid = tb.startTransaction()) {
+		try (Transaction tx = tb.startTransaction()) {
 			TraceObject threads = tb.trace.getObjectManager().getObjectByCanonicalPath(path);
 			threads.setElement(Lifespan.ALL, 2, null);
 		}
@@ -726,7 +747,7 @@ public class DebuggerModelProviderTest extends AbstractGhidraHeadedDebuggerGUITe
 
 		assertPathIs(path, 0, 3);
 
-		try (UndoableTransaction tid = tb.startTransaction()) {
+		try (Transaction tx = tb.startTransaction()) {
 			TraceObject thread = tb.trace.getObjectManager().getObjectByCanonicalPath(path);
 			thread.setAttribute(Lifespan.ALL, "_self", null);
 		}
@@ -751,14 +772,14 @@ public class DebuggerModelProviderTest extends AbstractGhidraHeadedDebuggerGUITe
 
 		assertPathIs(path, 3, 0);
 
-		try (UndoableTransaction tid = tb.startTransaction()) {
+		try (Transaction tx = tb.startTransaction()) {
 			element2.setLifespan(Lifespan.nowOn(10), ConflictResolution.DENY);
 		}
 		waitForTasks();
 
 		assertPathIs(path, 2, 0);
 
-		try (UndoableTransaction tid = tb.startTransaction()) {
+		try (Transaction tx = tb.startTransaction()) {
 			element2.setLifespan(Lifespan.nowOn(2), ConflictResolution.DENY);
 		}
 		waitForTasks();
@@ -783,14 +804,14 @@ public class DebuggerModelProviderTest extends AbstractGhidraHeadedDebuggerGUITe
 
 		assertPathIs(path, 0, 4); // _next created at snap 3
 
-		try (UndoableTransaction tid = tb.startTransaction()) {
+		try (Transaction tx = tb.startTransaction()) {
 			attrSelf.setLifespan(Lifespan.nowOn(10), ConflictResolution.DENY);
 		}
 		waitForTasks();
 
 		assertPathIs(path, 0, 3);
 
-		try (UndoableTransaction tid = tb.startTransaction()) {
+		try (Transaction tx = tb.startTransaction()) {
 			attrSelf.setLifespan(Lifespan.nowOn(2), ConflictResolution.DENY);
 		}
 		waitForTasks();
@@ -813,12 +834,12 @@ public class DebuggerModelProviderTest extends AbstractGhidraHeadedDebuggerGUITe
 			waitForValue(() -> modelProvider.objectsTreePanel.treeModel.getNode(path));
 		assertEquals("<html>[2]", node.getDisplayText());
 
-		try (UndoableTransaction tid = tb.startTransaction()) {
+		try (Transaction tx = tb.startTransaction()) {
 			thread.setAttribute(Lifespan.nowOn(0), "_display", "Renamed Thread");
 		}
 		waitForTasks();
 
-		waitForPass(() -> assertEquals("<html>Renamed Thread", node.getDisplayText()));
+		waitForPass(() -> assertEquals("<html>Renamed&nbsp;Thread", node.getDisplayText()));
 	}
 
 	@Test
@@ -915,6 +936,7 @@ public class DebuggerModelProviderTest extends AbstractGhidraHeadedDebuggerGUITe
 		traceManager.activateObject(processes);
 		waitForTasks();
 		traceManager.activateObject(root);
+		waitForTasks();
 		modelProvider.setPath(root.getCanonicalPath());
 		waitForTasks();
 
@@ -1025,5 +1047,205 @@ public class DebuggerModelProviderTest extends AbstractGhidraHeadedDebuggerGUITe
 		assertEquals(threadsPath, modelProvider.getPath());
 		assertEquals(threadsPath.index(0),
 			modelProvider.elementsTablePanel.getSelectedItem().getValue().getCanonicalPath());
+	}
+
+	@Test
+	public void testSetValueAffectsTree() throws Throwable {
+		createTraceAndPopulateObjects();
+
+		TraceObjectKeyPath threadsPath = TraceObjectKeyPath.parse("Processes[0].Threads");
+		TraceObject threads = tb.trace.getObjectManager().getObjectByCanonicalPath(threadsPath);
+		TraceObject thread0 =
+			tb.trace.getObjectManager().getObjectByCanonicalPath(threadsPath.index(0));
+
+		traceManager.activateTrace(tb.trace);
+		traceManager.activateSnap(1);
+		waitForSwing();
+
+		modelProvider.setPath(threadsPath);
+		waitForTasks();
+
+		AbstractNode node =
+			waitForValue(() -> modelProvider.objectsTreePanel.treeModel.getNode(threadsPath));
+		assertEquals(10, node.getChildren().size());
+
+		try (Transaction tx = tb.startTransaction()) {
+			threads.setAttribute(Lifespan.nowOn(0), "Current", thread0);
+		}
+		waitForDomainObject(tb.trace);
+		waitForTasks();
+
+		assertEquals(11, node.getChildren().size());
+	}
+
+	public void testDuplicateNameInSameParentDoesntCorruptTree() throws Throwable {
+		createTraceAndPopulateObjects();
+		TraceObjectKeyPath threadsPath = TraceObjectKeyPath.parse("Processes[0].Threads");
+		TraceObject threads = tb.trace.getObjectManager().getObjectByCanonicalPath(threadsPath);
+		TraceObject thread0 =
+			tb.trace.getObjectManager().getObjectByCanonicalPath(threadsPath.index(0));
+
+		traceManager.activateTrace(tb.trace);
+		traceManager.activateSnap(1);
+		waitForSwing();
+
+		modelProvider.setPath(threadsPath);
+		modelProvider.setLimitToCurrentSnap(false);
+		waitForTasks();
+
+		AbstractNode node =
+			waitForValue(() -> modelProvider.objectsTreePanel.treeModel.getNode(threadsPath));
+
+		try (Transaction tx = tb.startTransaction()) {
+			threads.setAttribute(Lifespan.at(0), "CurrentA", thread0);
+			threads.setAttribute(Lifespan.at(2), "CurrentA", thread0);
+			threads.setAttribute(Lifespan.at(0), "CurrentB", thread0);
+			threads.setAttribute(Lifespan.at(2), "CurrentB", thread0);
+		}
+		waitForTasks();
+
+		node.unloadChildren();
+		node.expand();
+		waitForTasks();
+
+		assertEquals(14, node.getChildCount());
+		Map<String, List<GTreeNode>> byName =
+			node.getChildren().stream().collect(Collectors.groupingBy(n -> n.getName()));
+		assertTrue(byName.values().stream().allMatch(c -> c.size() == 1));
+	}
+
+	// @Test
+	public void testDuplicateNameInDifferentParentsDoesntCorruptTree() throws Throwable {
+		// Unfinished.TODO();
+		// This is already covered. Processes has a [0] and Threads also has a [0].
+	}
+
+	@Test
+	public void testDuplicateNameDifferentLifespanAppearInAttributesTable() throws Throwable {
+		createTraceAndPopulateObjects();
+		TraceObjectKeyPath threadsPath = TraceObjectKeyPath.parse("Processes[0].Threads");
+		TraceObject threads = tb.trace.getObjectManager().getObjectByCanonicalPath(threadsPath);
+		TraceObject thread0 =
+			tb.trace.getObjectManager().getObjectByCanonicalPath(threadsPath.index(0));
+
+		traceManager.activateTrace(tb.trace);
+		traceManager.activateSnap(1);
+		waitForSwing();
+
+		modelProvider.setPath(threadsPath);
+		modelProvider.setLimitToCurrentSnap(false);
+		waitForTasks();
+
+		try (Transaction tx = tb.startTransaction()) {
+			threads.setAttribute(Lifespan.at(0), "CurrentA", thread0);
+			threads.setAttribute(Lifespan.at(2), "CurrentA", thread0);
+			threads.setAttribute(Lifespan.at(0), "CurrentB", thread0);
+			threads.setAttribute(Lifespan.at(2), "CurrentB", thread0);
+		}
+		waitForTasks();
+
+		waitForPass(() -> assertEquals(4,
+			modelProvider.attributesTablePanel.tableModel.getModelData().size()));
+	}
+
+	@Test
+	public void testDuplicateNameDifferentLifespanAppearInElementsTable() throws Throwable {
+		createTraceAndPopulateObjects();
+		TraceObjectKeyPath threadsPath = TraceObjectKeyPath.parse("Processes[0].Threads");
+		TraceObject threads = tb.trace.getObjectManager().getObjectByCanonicalPath(threadsPath);
+		TraceObject thread0 =
+			tb.trace.getObjectManager().getObjectByCanonicalPath(threadsPath.index(0));
+
+		traceManager.activateTrace(tb.trace);
+		traceManager.activateSnap(1);
+		waitForSwing();
+
+		modelProvider.setPath(threadsPath);
+		modelProvider.setLimitToCurrentSnap(false);
+		waitForTasks();
+
+		try (Transaction tx = tb.startTransaction()) {
+			threads.setElement(Lifespan.at(0), "CurrentA", thread0);
+			threads.setElement(Lifespan.at(2), "CurrentA", thread0);
+			threads.setElement(Lifespan.at(0), "CurrentB", thread0);
+			threads.setElement(Lifespan.at(2), "CurrentB", thread0);
+		}
+		waitForTasks();
+
+		// TODO: Should I collapse entries that are links to the same object?
+		//   Would use the "Life" column to display span for each included entry.
+		//   Neat, but not sure it's worth it
+		waitForPass(() -> assertEquals(14,
+			modelProvider.elementsTablePanel.tableModel.getModelData().size()));
+	}
+
+	protected Stream<DynamicTableColumn<?, ?, ?>> streamColumns(
+			GDynamicColumnTableModel<?, ?> model) {
+		return IntStream.range(0, model.getColumnCount()).mapToObj(model::getColumn);
+	}
+
+	protected <T extends DynamicTableColumn<?, ?, ?>> T findColumnOfType(
+			GDynamicColumnTableModel<?, ?> model, Class<T> type) {
+		return streamColumns(model)
+				.flatMap(c -> type.isInstance(c) ? Stream.of(type.cast(c)) : Stream.of())
+				.findAny()
+				.orElse(null);
+	}
+
+	protected TraceValueLifePlotColumn getPlotColumn() {
+		return findColumnOfType(modelProvider.elementsTablePanel.tableModel,
+			TraceValueLifePlotColumn.class);
+	}
+
+	@Test
+	public void testLifePlotColumnFitsSnapshotsOnActivate() throws Throwable {
+		createTraceAndPopulateObjects();
+
+		traceManager.activateTrace(tb.trace);
+		waitForSwing();
+
+		// NB. The plot adds a margin of 1
+		assertEquals(Lifespan.span(0, 21), getPlotColumn().getFullRange());
+	}
+
+	@Test
+	public void testLifePlotColumnFitsSnapshotsOnAddSnapshot() throws Throwable {
+		createTraceAndPopulateObjects();
+
+		traceManager.activateTrace(tb.trace);
+		waitForSwing();
+
+		try (Transaction tx = tb.startTransaction()) {
+			tb.trace.getTimeManager().getSnapshot(30, true);
+		}
+		waitForDomainObject(tb.trace);
+
+		// NB. The plot adds a margin of 1
+		assertEquals(Lifespan.span(0, 31), getPlotColumn().getFullRange());
+
+		try (Transaction tx = tb.startTransaction()) {
+			tb.trace.getTimeManager().getSnapshot(31, true);
+		}
+		waitForDomainObject(tb.trace);
+
+		assertEquals(Lifespan.span(0, 32), getPlotColumn().getFullRange());
+	}
+
+	@Test
+	public void testLifePlotColumnFitsSnapshotsOnAddSnapshotSupressEvents() throws Throwable {
+		createTraceAndPopulateObjects();
+
+		traceManager.activateTrace(tb.trace);
+		waitForSwing();
+
+		tb.trace.setEventsEnabled(false);
+		try (Transaction tx = tb.startTransaction()) {
+			tb.trace.getTimeManager().getSnapshot(30, true);
+		}
+		tb.trace.setEventsEnabled(true);
+		waitForDomainObject(tb.trace);
+
+		// NB. The plot adds a margin of 1
+		assertEquals(Lifespan.span(0, 31), getPlotColumn().getFullRange());
 	}
 }

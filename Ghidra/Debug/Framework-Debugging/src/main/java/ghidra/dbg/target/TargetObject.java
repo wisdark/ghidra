@@ -23,6 +23,7 @@ import java.util.stream.Collectors;
 import ghidra.async.AsyncFence;
 import ghidra.async.AsyncUtils;
 import ghidra.dbg.*;
+import ghidra.dbg.DebuggerObjectModel.RefreshBehavior;
 import ghidra.dbg.error.DebuggerModelTypeException;
 import ghidra.dbg.target.schema.*;
 import ghidra.dbg.util.PathUtils;
@@ -104,8 +105,7 @@ import ghidra.lifecycle.Internal;
  * <ul>
  * <li>"Threads" : {@link TargetObject}</li>
  * <ul>
- * <li>"Thread 1" : {@link TargetExecutionStateful}, {@link TargetSingleSteppable},
- * {@link TargetMultiSteppable}</li>
+ * <li>"Thread 1" : {@link TargetExecutionStateful}, {@link TargetSteppable}</li>
  * <ul>
  * <li>"Registers" : {@link TargetRegisterBank}</li>
  * <ul>
@@ -155,19 +155,27 @@ import ghidra.lifecycle.Internal;
  * object or throw an exception. In those cases, unless otherwise noted, this actually means the
  * future will complete with that object, or complete exceptionally. Specifying this in every
  * instance is just pedantic.
+ * 
+ * <p>
+ * Assuming Trace RMI is successful, this interface will face a serious identity crisis. It will no
+ * longer serve its purpose as a proper Java interface, and instead will only serve as a type name
+ * in the object-model schema, which survives in the trace database. For some of the interfaces, we
+ * already have defined equivalent interfaces in the trace object manager. We will probably port
+ * additional interfaces over and eventually remove all of these.
  */
 public interface TargetObject extends Comparable<TargetObject> {
 
 	Set<Class<? extends TargetObject>> ALL_INTERFACES =
-		Set.of(TargetAccessConditioned.class, TargetActiveScope.class, TargetAggregate.class,
-			TargetAttachable.class, TargetAttacher.class, TargetBreakpointLocation.class,
-			TargetBreakpointLocationContainer.class, TargetBreakpointSpec.class,
-			TargetBreakpointSpecContainer.class, TargetConfigurable.class, TargetConsole.class,
-			TargetDataTypeMember.class, TargetDataTypeNamespace.class, TargetDeletable.class,
-			TargetDetachable.class, TargetEnvironment.class, TargetEventScope.class,
-			TargetExecutionStateful.class, TargetFocusScope.class, TargetInterpreter.class,
-			TargetInterruptible.class, TargetKillable.class, TargetLauncher.class,
-			TargetMemory.class, TargetMemoryRegion.class, TargetMethod.class, TargetModule.class,
+		Set.of(TargetAccessConditioned.class, TargetActivatable.class, TargetActiveScope.class,
+			TargetAggregate.class, TargetAttachable.class, TargetAttacher.class,
+			TargetBreakpointLocation.class, TargetBreakpointLocationContainer.class,
+			TargetBreakpointSpec.class, TargetBreakpointSpecContainer.class,
+			TargetConfigurable.class, TargetConsole.class, TargetDataTypeMember.class,
+			TargetDataTypeNamespace.class, TargetDeletable.class, TargetDetachable.class,
+			TargetEnvironment.class, TargetEventScope.class, TargetExecutionStateful.class,
+			TargetFocusScope.class, TargetInterpreter.class, TargetInterruptible.class,
+			TargetKillable.class, TargetLauncher.class, TargetMemory.class,
+			TargetMemoryRegion.class, TargetMethod.class, TargetModule.class,
 			TargetModuleContainer.class, TargetNamedDataType.class, TargetProcess.class,
 			TargetRegister.class, TargetRegisterBank.class, TargetRegisterContainer.class,
 			TargetResumable.class, TargetSection.class, TargetSectionContainer.class,
@@ -464,7 +472,7 @@ public interface TargetObject extends Comparable<TargetObject> {
 	 * <p>
 	 * This is an informal notion of type and may only be used for visual styling, logging, or other
 	 * informational purposes. Scripts should not rely on this to predict behavior, but instead on
-	 * {@link #getAs(Class)}, {@link #getInterfaces()}, or {@link #getSchema()}.
+	 * {@link #as(Class)}, {@link #getInterfaces()}, or {@link #getSchema()}.
 	 * 
 	 * @return an informal name of this object's type
 	 */
@@ -508,10 +516,11 @@ public interface TargetObject extends Comparable<TargetObject> {
 	 * 
 	 * <p>
 	 * In general, an invalid object should be disposed by the user immediately on discovering it is
-	 * invalid. See {@link DebuggerModelListener#invalidated(TargetObject)} for a means of reacting
-	 * to object invalidation. Nevertheless, it is acceptable to access stale attributes and element
-	 * keys, for informational purposes only. Implementors must reject all commands, including
-	 * fetches, on an invalid object by throwing an {@link IllegalStateException}.
+	 * invalid. See {@link DebuggerModelListener#invalidated(TargetObject, TargetObject, String)}
+	 * for a means of reacting to object invalidation. Nevertheless, it is acceptable to access
+	 * stale attributes and element keys, for informational purposes only. Implementors must reject
+	 * all commands, including fetches, on an invalid object by throwing an
+	 * {@link IllegalStateException}.
 	 * 
 	 * @return true if valid, false if invalid
 	 */
@@ -527,17 +536,18 @@ public interface TargetObject extends Comparable<TargetObject> {
 	 * @param refresh true to invalidate all caches involved in handling this request
 	 * @return a future which completes with a name-value map of attributes
 	 */
-	public default CompletableFuture<? extends Map<String, ?>> fetchAttributes(boolean refresh) {
+	public default CompletableFuture<? extends Map<String, ?>> fetchAttributes(
+			RefreshBehavior refresh) {
 		return getModel().fetchObjectAttributes(getPath(), refresh);
 	}
 
 	/**
 	 * Fetch all attributes of this object, without refreshing
 	 * 
-	 * @see #fetchAttributes(boolean)
+	 * @see #fetchAttributes(RefreshBehavior)
 	 */
 	public default CompletableFuture<? extends Map<String, ?>> fetchAttributes() {
-		return fetchAttributes(false);
+		return fetchAttributes(RefreshBehavior.REFRESH_NEVER);
 	}
 
 	/**
@@ -618,17 +628,17 @@ public interface TargetObject extends Comparable<TargetObject> {
 	 * @return a future which completes with a index-value map of elements
 	 */
 	public default CompletableFuture<? extends Map<String, ? extends TargetObject>> fetchElements(
-			boolean refresh) {
+			RefreshBehavior refresh) {
 		return getModel().fetchObjectElements(getPath(), refresh);
 	}
 
 	/**
 	 * Fetch all elements of this object, without refreshing
 	 * 
-	 * @see #fetchElements(boolean)
+	 * @see #fetchElements(RefreshBehavior)
 	 */
 	public default CompletableFuture<? extends Map<String, ? extends TargetObject>> fetchElements() {
-		return fetchElements(false);
+		return fetchElements(RefreshBehavior.REFRESH_NEVER);
 	}
 
 	/**
@@ -653,7 +663,8 @@ public interface TargetObject extends Comparable<TargetObject> {
 	 * @param refresh true to invalidate all caches involved in handling this request
 	 * @return a future which completes with a name-value map of children
 	 */
-	public default CompletableFuture<? extends Map<String, ?>> fetchChildren(boolean refresh) {
+	public default CompletableFuture<? extends Map<String, ?>> fetchChildren(
+			RefreshBehavior refresh) {
 		AsyncFence fence = new AsyncFence();
 		Map<String, Object> children = new TreeMap<>(TargetObjectKeyComparator.CHILD);
 		fence.include(fetchElements(refresh).thenAccept(elements -> {
@@ -671,7 +682,7 @@ public interface TargetObject extends Comparable<TargetObject> {
 	 * @see #fetchChildren(boolean)
 	 */
 	public default CompletableFuture<? extends Map<String, ?>> fetchChildren() {
-		return fetchChildren(false);
+		return fetchChildren(RefreshBehavior.REFRESH_NEVER);
 	}
 
 	/**
@@ -951,7 +962,8 @@ public interface TargetObject extends Comparable<TargetObject> {
 	 * @param refreshElements as the model to refresh elements, querying the debugger if needed
 	 * @return a future which completes when the children are updated.
 	 */
-	CompletableFuture<Void> resync(boolean refreshAttributes, boolean refreshElements);
+	CompletableFuture<Void> resync(RefreshBehavior refreshAttributes,
+			RefreshBehavior refreshElements);
 
 	/**
 	 * Refresh the elements of this object
@@ -959,7 +971,7 @@ public interface TargetObject extends Comparable<TargetObject> {
 	 * @return a future which completes when the children are updated.
 	 */
 	default CompletableFuture<Void> resync() {
-		return resync(false, true);
+		return resync(RefreshBehavior.REFRESH_NEVER, RefreshBehavior.REFRESH_ALWAYS);
 	}
 
 	/**
@@ -1059,6 +1071,9 @@ public interface TargetObject extends Comparable<TargetObject> {
 	 * @return the found object, or null
 	 */
 	public default <T extends TargetObject> T getCachedSuitable(Class<T> cls) {
+		if (cls == TargetObject.class) {
+			return cls.cast(this);
+		}
 		List<String> found = getModel().getRootSchema().searchForSuitable(cls, getPath());
 		if (found == null) {
 			return null;
@@ -1082,6 +1097,6 @@ public interface TargetObject extends Comparable<TargetObject> {
 	 * @return a future which completes when the caches are invalidated
 	 */
 	public default CompletableFuture<Void> invalidateCaches() {
-		return AsyncUtils.NIL;
+		return AsyncUtils.nil();
 	}
 }

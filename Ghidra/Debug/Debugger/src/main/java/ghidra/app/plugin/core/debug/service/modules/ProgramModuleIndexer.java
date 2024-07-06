@@ -22,7 +22,6 @@ import java.util.stream.Collectors;
 import com.google.gson.Gson;
 import com.google.gson.reflect.TypeToken;
 
-import ghidra.app.plugin.core.debug.utils.DomainFolderChangeAdapter;
 import ghidra.app.plugin.core.debug.utils.ProgramURLUtils;
 import ghidra.framework.model.*;
 import ghidra.framework.options.Options;
@@ -33,7 +32,7 @@ import ghidra.program.model.listing.Program;
 import ghidra.trace.model.modules.TraceModule;
 
 // TODO: Consider making this a front-end plugin?
-public class ProgramModuleIndexer implements DomainFolderChangeAdapter {
+public class ProgramModuleIndexer implements DomainFolderChangeListener {
 	public static final String MODULE_PATHS_PROPERTY = "Module Paths";
 	private static final Gson JSON = new Gson();
 
@@ -94,7 +93,8 @@ public class ProgramModuleIndexer implements DomainFolderChangeAdapter {
 		}
 
 		@Override
-		public void domainObjectClosed() {
+		public void domainObjectClosed(DomainObject dobj) {
+			// assume dobj == program
 			dispose();
 		}
 
@@ -103,13 +103,13 @@ public class ProgramModuleIndexer implements DomainFolderChangeAdapter {
 			if (disposed) {
 				return;
 			}
-			if (ev.containsEvent(DomainObject.DO_OBJECT_RESTORED)) {
+			if (ev.contains(DomainObjectEvent.RESTORED)) {
 				refreshIndex(program.getDomainFile(), program);
 				return;
 			}
-			if (ev.containsEvent(DomainObject.DO_PROPERTY_CHANGED)) {
+			if (ev.contains(DomainObjectEvent.PROPERTY_CHANGED)) {
 				for (DomainObjectChangeRecord rec : ev) {
-					if (rec.getEventType() == DomainObject.DO_PROPERTY_CHANGED) {
+					if (rec.getEventType() == DomainObjectEvent.PROPERTY_CHANGED) {
 						// OldValue is actually the property name :/
 						// See DomainObjectAdapter#propertyChanged
 						String propertyName = (String) rec.getOldValue();
@@ -288,11 +288,6 @@ public class ProgramModuleIndexer implements DomainFolderChangeAdapter {
 	}
 
 	@Override
-	public void domainFileObjectReplaced(DomainFile file, DomainObject oldObject) {
-		refreshIndex(file);
-	}
-
-	@Override
 	public void domainFileObjectOpenedForUpdate(DomainFile file, DomainObject object) {
 		if (disposed) {
 			return;
@@ -353,9 +348,8 @@ public class ProgramModuleIndexer implements DomainFolderChangeAdapter {
 		 * trace, or bogus external libraries in a mapped program, scoring libraries before module
 		 * names should not cause problems.
 		 */
-		Comparator<IndexEntry> comparator = byIsLibrary
-				.thenComparing(byNameSource)
-				.thenComparing(byFolderUses);
+		Comparator<IndexEntry> comparator =
+			byIsLibrary.thenComparing(byNameSource).thenComparing(byFolderUses);
 		return projectData.getFileByID(entries.stream().max(comparator).get().dfID);
 	}
 
@@ -371,8 +365,9 @@ public class ProgramModuleIndexer implements DomainFolderChangeAdapter {
 					new AddressRangeImpl(space.getMinAddress(), space.getMaxAddress()),
 					module.getLifespan())
 				.stream()
-				.map(m -> ProgramURLUtils.getFileForHackedUpGhidraURL(project,
+				.map(m -> ProgramURLUtils.getDomainFileFromOpenProject(project,
 					m.getStaticProgramURL()))
+				.filter(Objects::nonNull)
 				.collect(Collectors.toSet());
 		Set<DomainFile> libraries = DebuggerStaticMappingUtils.collectLibraries(alreadyMapped);
 		alreadyMapped.stream()
@@ -415,7 +410,7 @@ public class ProgramModuleIndexer implements DomainFolderChangeAdapter {
 				continue;
 			}
 			try (PeekOpenedDomainObject peek = new PeekOpenedDomainObject(df)) {
-				if (programs.contains(peek.object)) {
+				if (peek.object != null && programs.contains(peek.object)) {
 					result.add(e);
 				}
 			}

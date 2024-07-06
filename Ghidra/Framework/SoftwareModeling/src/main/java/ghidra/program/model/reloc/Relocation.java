@@ -38,7 +38,7 @@ public class Relocation {
 		UNKNOWN(0, true),
 
 		/**
-		 * Relocation has be intentionally skipped and should not be treated as a failure.
+		 * Relocation has been intentionally skipped and should not be treated as a failure.
 		 */
 		SKIPPED(1, false),
 
@@ -105,8 +105,7 @@ public class Relocation {
 					return s;
 				}
 			}
-			throw new IllegalArgumentException(
-				"Undefined Status value: " + value);
+			throw new IllegalArgumentException("Undefined Status value: " + value);
 		}
 	}
 
@@ -182,6 +181,16 @@ public class Relocation {
 	 */
 	public byte[] getBytes() {
 		return bytes;
+	}
+
+	/**
+	 * Returns the number of original instruction bytes affected by applied relocation.
+	 * 
+	 * @return number of original instruction bytes affected by relocation if it was successfully applied
+	 * (i.e., {@link Status#APPLIED}, {@link Status#APPLIED_OTHER}), otherwise null may be returned.
+	 */
+	public int getLength() {
+		return bytes != null ? bytes.length : 0;
 	}
 
 	/**

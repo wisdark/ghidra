@@ -457,7 +457,7 @@ public class GhidraScriptEditorComponentProvider extends ComponentProvider {
 		//
 		// Cancel
 		//
-		if (choice == OptionDialog.OPTION_THREE) {
+		if (choice == OptionDialog.CANCEL_OPTION) {
 			// Cancel
 			return;
 		}
@@ -561,8 +561,8 @@ public class GhidraScriptEditorComponentProvider extends ComponentProvider {
 
 	private boolean saveAs() {
 		HelpLocation help = new HelpLocation(plugin.getName(), saveAction.getName());
-		SaveDialog dialog =
-			new SaveDialog(getComponent(), "Save Script", provider, scriptSourceFile, help);
+		SaveDialog dialog = new SaveDialog(getComponent(), "Save Script", provider,
+			scriptSourceFile, GhidraScriptUtil.getProvider(scriptSourceFile), help);
 		if (dialog.isCancelled()) {
 			return false;
 		}

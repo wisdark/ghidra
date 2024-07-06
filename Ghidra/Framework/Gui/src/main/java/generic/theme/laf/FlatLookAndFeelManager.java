@@ -28,19 +28,20 @@ public class FlatLookAndFeelManager extends LookAndFeelManager {
 	}
 
 	@Override
-	protected void fixupLookAndFeelIssues() {
-		super.fixupLookAndFeelIssues();
-
-		// We have historically managed button focus-ability ourselves.  Allow this by default so
-		// features continue to work as expected, such as right-clicking on ToolButtons.
-		UIManager.put("ToolBar.focusableButtons", Boolean.TRUE);
-	}
-
-	@Override
-	protected UiDefaultsMapper getUiDefaultsMapper(UIDefaults defaults) {
+	protected UiDefaultsMapper createUiDefaultsMapper(UIDefaults defaults) {
 		if (getLookAndFeelType() == LafType.FLAT_DARK) {
 			return new FlatDarkUiDefaultsMapper(defaults);
 		}
 		return new FlatUiDefaultsMapper(defaults);
+	}
+
+	@Override
+	protected void fixupLookAndFeelIssues() {
+		super.fixupLookAndFeelIssues();
+		// 
+		// The FlatTreeUI class will remove default renderers inside the call to updateRenderer()
+		// if "Tree.showDefaultIcons" is false.  We want the tree to display folder icons.
+		//
+		UIManager.put("Tree.showDefaultIcons", Boolean.TRUE);
 	}
 }

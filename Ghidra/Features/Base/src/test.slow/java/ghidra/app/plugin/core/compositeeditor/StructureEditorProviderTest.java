@@ -22,13 +22,17 @@ import java.awt.Window;
 import org.junit.Assert;
 import org.junit.Test;
 
-import docking.ActionContext;
+import docking.DefaultActionContext;
+import docking.action.DockingActionIf;
+import docking.action.ToggleDockingActionIf;
 import ghidra.framework.options.Options;
 import ghidra.program.model.data.*;
 import ghidra.util.exception.DuplicateNameException;
 import ghidra.util.exception.UsrException;
 
 public class StructureEditorProviderTest extends AbstractStructureEditorTest {
+	private static final String HEX_OPTION_NAME =
+		"Structure Editor" + Options.DELIMITER + "Show Numbers In Hex";
 
 	@Override
 	protected void init(Structure dt, final Category cat, final boolean showInHex) {
@@ -104,17 +108,15 @@ public class StructureEditorProviderTest extends AbstractStructureEditorTest {
 	// Test Undo / Redo of program.
 	@Test
 	public void testModifiedDtAndProgramRestored() throws Exception {
-		RestoreListener restoreListener = new RestoreListener();
 		Window dialog;
 		try {
 			init(complexStructure, pgmTestCat, false);
-			program.addListener(restoreListener);
 
 			// Change the structure
 			runSwingLater(() -> {
 				getTable().requestFocus();
 				setSelection(new int[] { 4, 5 });
-				deleteAction.actionPerformed(new ActionContext());
+				deleteAction.actionPerformed(new DefaultActionContext());
 				try {
 					model.add(new WordDataType());
 				}
@@ -133,8 +135,8 @@ public class StructureEditorProviderTest extends AbstractStructureEditorTest {
 			runSwingLater(() -> {
 				getTable().requestFocus();
 				setSelection(new int[] { 1 });
-				clearAction.actionPerformed(new ActionContext());
-				deleteAction.actionPerformed(new ActionContext());// Must be undefined before it can delete.
+				clearAction.actionPerformed(new DefaultActionContext());
+				deleteAction.actionPerformed(new DefaultActionContext());// Must be undefined before it can delete.
 			});
 			waitForSwing();
 			assertFalse(complexStructure.isEquivalent(model.viewComposite));
@@ -161,7 +163,6 @@ public class StructureEditorProviderTest extends AbstractStructureEditorTest {
 		}
 		finally {
 			dialog = null;
-			program.removeListener(restoreListener);
 		}
 	}
 
@@ -169,7 +170,6 @@ public class StructureEditorProviderTest extends AbstractStructureEditorTest {
 	// This should close the edit session.
 	@Test
 	public void testProgramRestoreRemovesEditedDt() throws Exception {
-		RestoreListener restoreListener = new RestoreListener();
 		Window dialog;
 		try {
 			Structure s1 = new StructureDataType("s1", 0);
@@ -193,7 +193,6 @@ public class StructureEditorProviderTest extends AbstractStructureEditorTest {
 			final Structure myS1Structure = s1Struct;
 
 			init(myS1Structure, pgmTestCat, false);
-			program.addListener(restoreListener);
 
 			// Change the structure.
 			runSwingLater(() -> {
@@ -228,7 +227,6 @@ public class StructureEditorProviderTest extends AbstractStructureEditorTest {
 		}
 		finally {
 			dialog = null;
-			program.removeListener(restoreListener);
 		}
 	}
 
@@ -236,7 +234,6 @@ public class StructureEditorProviderTest extends AbstractStructureEditorTest {
 	// program so it goes away. This should close the edit session.
 	@Test
 	public void testProgramRestoreRemovesEditedDtComp() throws Exception {
-		RestoreListener restoreListener = new RestoreListener();
 		Window dialog;
 		try {
 			Structure s1 = new StructureDataType("s1", 0);
@@ -264,7 +261,6 @@ public class StructureEditorProviderTest extends AbstractStructureEditorTest {
 			assertTrue(s2.isEquivalent(myS2Structure));
 
 			init(myS2Structure, pgmTestCat, false);
-			program.addListener(restoreListener);
 
 			// Change the structure.
 			runSwing(() -> {
@@ -299,7 +295,6 @@ public class StructureEditorProviderTest extends AbstractStructureEditorTest {
 		}
 		finally {
 			dialog = null;
-			program.removeListener(restoreListener);
 		}
 	}
 
@@ -307,14 +302,12 @@ public class StructureEditorProviderTest extends AbstractStructureEditorTest {
 	// so it goes away. The editor stays since the structure existed previously, but editor reloads.
 	@Test
 	public void testProgramRestoreRemovesEditedComponentDtYes() throws Exception {
-		RestoreListener restoreListener = new RestoreListener();
 		Window dialog;
 		try {
 			Structure myStruct = new StructureDataType("myStruct", 0);
 			myStruct.add(new WordDataType());
 
 			init(emptyStructure, pgmTestCat, false);
-			program.addListener(restoreListener);
 
 			// Add the data type so that we can undo its add.
 			boolean commit = true;
@@ -367,7 +360,6 @@ public class StructureEditorProviderTest extends AbstractStructureEditorTest {
 		}
 		finally {
 			dialog = null;
-			program.removeListener(restoreListener);
 		}
 	}
 
@@ -375,14 +367,12 @@ public class StructureEditorProviderTest extends AbstractStructureEditorTest {
 	// so it goes away. The editor stays since the structure existed previously, but doesn't reload.
 	@Test
 	public void testProgramRestoreRemovesEditedComponentDtNo() throws Exception {
-		RestoreListener restoreListener = new RestoreListener();
 		Window dialog;
 		try {
 			Structure myStruct = new StructureDataType("myStruct", 0);
 			myStruct.add(new WordDataType());
 
 			init(emptyStructure, pgmTestCat, false);
-			program.addListener(restoreListener);
 
 			// Add the data type so that we can undo its add.
 			boolean commit = true;
@@ -434,45 +424,37 @@ public class StructureEditorProviderTest extends AbstractStructureEditorTest {
 		}
 		finally {
 			dialog = null;
-			program.removeListener(restoreListener);
 		}
 	}
 
 	// Test Undo / Redo of program.
 	@Test
 	public void testUnModifiedDtAndProgramRestored() throws Exception {
-		RestoreListener restoreListener = new RestoreListener();
-		try {
-			init(complexStructure, pgmTestCat, false);
-			program.addListener(restoreListener);
+		init(complexStructure, pgmTestCat, false);
 
-			// Change the structure
-			runSwingLater(() -> {
-				getTable().requestFocus();
-				setSelection(new int[] { 4, 5 });
-				deleteAction.actionPerformed(new ActionContext());
-				try {
-					model.add(new WordDataType());
-				}
-				catch (UsrException e) {
-					Assert.fail(e.getMessage());
-				}
-			});
-			waitForSwing();
-			assertFalse(complexStructure.isEquivalent(model.viewComposite));
-			// Apply the changes
-			invoke(applyAction);
-			assertTrue(complexStructure.isEquivalent(model.viewComposite));
-			// Undo the apply
-			undo(program);
-			assertTrue(complexStructure.isEquivalent(model.viewComposite));
-			// Redo the apply
-			redo(program);
-			assertTrue(complexStructure.isEquivalent(model.viewComposite));
-		}
-		finally {
-			program.removeListener(restoreListener);
-		}
+		// Change the structure
+		runSwingLater(() -> {
+			getTable().requestFocus();
+			setSelection(new int[] { 4, 5 });
+			deleteAction.actionPerformed(new DefaultActionContext());
+			try {
+				model.add(new WordDataType());
+			}
+			catch (UsrException e) {
+				Assert.fail(e.getMessage());
+			}
+		});
+		waitForSwing();
+		assertFalse(complexStructure.isEquivalent(model.viewComposite));
+		// Apply the changes
+		invoke(applyAction);
+		assertTrue(complexStructure.isEquivalent(model.viewComposite));
+		// Undo the apply
+		undo(program);
+		assertTrue(complexStructure.isEquivalent(model.viewComposite));
+		// Redo the apply
+		redo(program);
+		assertTrue(complexStructure.isEquivalent(model.viewComposite));
 	}
 
 	@Test
@@ -498,14 +480,15 @@ public class StructureEditorProviderTest extends AbstractStructureEditorTest {
 	@Test
 	public void testCloseEditorProviderAndSave() throws Exception {
 		Window dialog;
+		DataType oldDt = complexStructure.clone(null);
+
 		init(complexStructure, pgmTestCat, false);
-		DataType oldDt = model.viewComposite.clone(null);
 
 		// Change the structure
 		runSwingLater(() -> {
 			getTable().requestFocus();
 			setSelection(new int[] { 4, 5 });
-			deleteAction.actionPerformed(new ActionContext());
+			deleteAction.actionPerformed(new DefaultActionContext());
 			try {
 				model.add(new WordDataType());
 			}
@@ -534,14 +517,15 @@ public class StructureEditorProviderTest extends AbstractStructureEditorTest {
 	@Test
 	public void testCloseEditorAndNoSave() throws Exception {
 
+		DataType oldDt = complexStructure.clone(null);
+
 		init(complexStructure, pgmTestCat, false);
-		DataType oldDt = model.viewComposite.clone(null);
 
 		// Change the structure
 		runSwing(() -> {
 			getTable().requestFocus();
 			setSelection(new int[] { 4, 5 });
-			deleteAction.actionPerformed(new ActionContext());
+			deleteAction.actionPerformed(new DefaultActionContext());
 			try {
 				model.add(new WordDataType());
 			}
@@ -567,7 +551,7 @@ public class StructureEditorProviderTest extends AbstractStructureEditorTest {
 		runSwingLater(() -> {
 			getTable().requestFocus();
 			setSelection(new int[] { 4, 5 });
-			deleteAction.actionPerformed(new ActionContext());
+			deleteAction.actionPerformed(new DefaultActionContext());
 			try {
 				model.add(new WordDataType());
 			}
@@ -653,98 +637,61 @@ public class StructureEditorProviderTest extends AbstractStructureEditorTest {
 	}
 
 	@Test
-	public void testChangeHexNumbersOption() throws Exception {
-		final Options options = tool.getOptions("Editors");
-		final String hexNumbersName =
-			"Structure Editor" + Options.DELIMITER + "Show Numbers In Hex";
-
-		runSwing(() -> {
-			boolean showNumbersInHex = options.getBoolean(hexNumbersName, false);
-			installProvider(
-				new StructureEditorProvider(plugin, complexStructure, showNumbersInHex));
-			model = provider.getModel();
-		});
-
-		DataType oldDt = model.viewComposite.clone(null);
-
-		// Get the hex option values
-		boolean hexNumbers = options.getBoolean(hexNumbersName, false);
-		assertEquals(false, hexNumbers);
-		// Check the values are in decimal
-		assertEquals(false, model.isShowingNumbersInHex());
-		assertEquals("47", model.getValueAt(15, model.getOffsetColumn()));
-		assertEquals("45", model.getValueAt(15, model.getLengthColumn()));
-		assertEquals("325", model.getLengthAsString());
-
-		// Set the hex offset option value to Hex
-		options.setBoolean(hexNumbersName, true);
-
-		// Get the hex option values
-		hexNumbers = options.getBoolean(hexNumbersName, false);
-		assertEquals(true, hexNumbers);
-		// Check the values (offset should still be decimal in editor)
-		assertEquals(false, model.isShowingNumbersInHex());
-		assertEquals("47", model.getValueAt(15, model.getOffsetColumn()));
-		assertEquals("45", model.getValueAt(15, model.getLengthColumn()));
-		assertEquals("325", model.getLengthAsString());
-
-		// Close the editor
-		runSwingLater(() -> provider.closeComponent());
-		waitForSwing();
-		waitForBusyTool(tool);
-		waitForSwing();
-		// Editor should be closed.
-		assertFalse(tool.isVisible(provider));
-		assertTrue(complexStructure.isEquivalent(oldDt));
-
-		// Re-open the editor
-		runSwing(() -> {
-			boolean showNumbersInHex = options.getBoolean(hexNumbersName, false);
-			installProvider(
-				new StructureEditorProvider(plugin, complexStructure, showNumbersInHex));
-			model = provider.getModel();
-		});
-
-		// Get the hex option values (offset should now be hexadecimal in editor)
-		hexNumbers = options.getBoolean(hexNumbersName, false);
-		assertEquals(true, hexNumbers);
-		// Check the values
+	public void testEditorHexModeDefaultsFromOptions() throws Exception {
+		// options default is hex
+		provider = edit(complexStructure);
+		model = provider.getModel();
 		assertEquals(true, model.isShowingNumbersInHex());
 		assertEquals("0x2f", model.getValueAt(15, model.getOffsetColumn()));
 		assertEquals("0x2d", model.getValueAt(15, model.getLengthColumn()));
 		assertEquals("0x145", model.getLengthAsString());
 
-		// Set the hex offset option value to decimal
-		options.setBoolean(hexNumbersName, false);
+		closeProvider(provider);
+		setOptions(HEX_OPTION_NAME, false);
 
-		// Get the hex option values
-		hexNumbers = options.getBoolean(hexNumbersName, false);
-		assertEquals(false, hexNumbers);
-		// Check the values (offset should still be hexadecimal in editor)
+		provider = edit(complexStructure);
+		model = provider.getModel();
+		assertEquals(false, model.isShowingNumbersInHex());
+		assertEquals("47", model.getValueAt(15, model.getOffsetColumn()));
+		assertEquals("45", model.getValueAt(15, model.getLengthColumn()));
+		assertEquals("325", model.getLengthAsString());
+	}
+
+	@Test
+	public void testHexDisplayOptionsChangeDoesntAffectExisting() throws Exception {
+		// options default is hex
+		provider = edit(complexStructure);
+		model = provider.getModel();
 		assertEquals(true, model.isShowingNumbersInHex());
 		assertEquals("0x2f", model.getValueAt(15, model.getOffsetColumn()));
 		assertEquals("0x2d", model.getValueAt(15, model.getLengthColumn()));
 		assertEquals("0x145", model.getLengthAsString());
 
-		// Close the editor
-		runSwingLater(() -> provider.closeComponent());
-		waitForSwing();
-		waitForBusyTool(tool);
-		waitForSwing();
-		// Editor should be closed.
-		assertFalse(tool.isVisible(provider));
-		assertTrue(complexStructure.isEquivalent(oldDt));
-		// Re-open the editor
-		init(complexStructure, pgmTestCat, false);
+		setOptions(HEX_OPTION_NAME, false);
 
-		// Get the hex option values (offset should now be decimal in editor)
-		hexNumbers = options.getBoolean(hexNumbersName, false);
-		assertEquals(false, hexNumbers);
-		// Check the values are in decimal
+		assertEquals(true, model.isShowingNumbersInHex());
+		assertEquals("0x2f", model.getValueAt(15, model.getOffsetColumn()));
+		assertEquals("0x2d", model.getValueAt(15, model.getLengthColumn()));
+		assertEquals("0x145", model.getLengthAsString());
+	}
+
+	@Test
+	public void testToggleHexModeAction() throws Exception {
+		provider = edit(complexStructure);
+		model = provider.getModel();
+		assertEquals(true, model.isShowingNumbersInHex());
+		assertEquals("0x2f", model.getValueAt(15, model.getOffsetColumn()));
+		assertEquals("0x2d", model.getValueAt(15, model.getLengthColumn()));
+		assertEquals("0x145", model.getLengthAsString());
+
+		DockingActionIf action = getAction(plugin, "Show Numbers In Hex");
+		setToggleActionSelected((ToggleDockingActionIf) action, new DefaultActionContext(), false);
+
 		assertEquals(false, model.isShowingNumbersInHex());
 		assertEquals("47", model.getValueAt(15, model.getOffsetColumn()));
 		assertEquals("45", model.getValueAt(15, model.getLengthColumn()));
 		assertEquals("325", model.getLengthAsString());
+
 	}
 
 	@Test
@@ -794,5 +741,12 @@ public class StructureEditorProviderTest extends AbstractStructureEditorTest {
 		dialog.dispose();
 
 		assertFalse(tool.isVisible(provider));
+	}
+
+	protected StructureEditorProvider edit(DataType dt) {
+		runSwing(() -> {
+			plugin.edit(dt);
+		});
+		return waitForComponentProvider(StructureEditorProvider.class);
 	}
 }

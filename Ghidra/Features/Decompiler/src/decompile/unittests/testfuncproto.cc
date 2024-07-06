@@ -18,6 +18,8 @@
 #include "test.hh"
 #include <iostream>
 
+namespace ghidra {
+
 class FuncProtoTestEnvironment {
   Architecture *g;
   ProtoModel *mod1;
@@ -32,7 +34,7 @@ public:
 
 static FuncProtoTestEnvironment theEnviron;
 
-static Architecture *glb;
+static Architecture *glb = (Architecture *)0;
 
 FuncProtoTestEnvironment::FuncProtoTestEnvironment(void)
 
@@ -44,7 +46,11 @@ FuncProtoTestEnvironment::FuncProtoTestEnvironment(void)
 void FuncProtoTestEnvironment::build(void)
 
 {
-  if (theEnviron.g != (Architecture *)0) return;
+  if (theEnviron.g != (Architecture *)0) {
+    if (glb == (Architecture *)0)
+      throw LowlevelError("Architecture did not load");
+    return;
+  }
   ArchitectureCapability *xmlCapability = ArchitectureCapability::getCapability("xml");
   istringstream s(
       "<binaryimage arch=\"Toy:LE:32:default:default\"></binaryimage>"
@@ -213,9 +219,8 @@ TEST(funcproto_register) {
   istringstream s("void func(int4 a,int4 b);");
   PrototypePieces pieces;
   parse_protopieces(pieces,s,glb);
-  pieces.intypes.insert(pieces.intypes.begin(),pieces.outtype);
   vector<ParameterPieces> res;
-  model->assignParameterStorage(pieces.intypes, res, false);
+  model->assignParameterStorage(pieces, res, false);
   ASSERT_EQUALS(res.size(),3);
   ASSERT(res[0].addr.isInvalid());	// Placeholder for void return value
   ASSERT(register_equal(res[1],"r12"));
@@ -227,9 +232,8 @@ TEST(funcproto_smallregister) {
   istringstream s("int4 func(char a,int4 b,int2 c,int4 d);");
   PrototypePieces pieces;
   parse_protopieces(pieces,s,glb);
-  pieces.intypes.insert(pieces.intypes.begin(),pieces.outtype);
   vector<ParameterPieces> res;
-  model->assignParameterStorage(pieces.intypes, res, false);
+  model->assignParameterStorage(pieces, res, false);
   ASSERT_EQUALS(res.size(),5);
   ASSERT(register_equal(res[0],"r12"));	// output register
   ASSERT_EQUALS(res[0].type->getName(),"int4");
@@ -248,9 +252,8 @@ TEST(funcproto_stackalign) {
   istringstream s("int4 func(int4 a,int4 b,int4 c,int4 d,int4 e,int2 f,int1 *g);");
   PrototypePieces pieces;
   parse_protopieces(pieces,s,glb);
-  pieces.intypes.insert(pieces.intypes.begin(),pieces.outtype);
   vector<ParameterPieces> res;
-  model->assignParameterStorage(pieces.intypes, res, false);
+  model->assignParameterStorage(pieces, res, false);
   ASSERT_EQUALS(res.size(),8);
   ASSERT(register_equal(res[0],"r12"));	// output register
   ASSERT_EQUALS(res[0].type->getName(),"int4");
@@ -277,9 +280,8 @@ TEST(funcproto_pointeroverflow) {
   istringstream s("int2 func(int4 a,int8 b,int4 c);");
   PrototypePieces pieces;
   parse_protopieces(pieces,s,glb);
-  pieces.intypes.insert(pieces.intypes.begin(),pieces.outtype);
   vector<ParameterPieces> res;
-  model->assignParameterStorage(pieces.intypes, res, false);
+  model->assignParameterStorage(pieces, res, false);
   ASSERT_EQUALS(res.size(),4);
   ASSERT(register_equal(res[0],"r12"));	// output register
   ASSERT_EQUALS(res[0].type->getName(),"int2");
@@ -298,9 +300,8 @@ TEST(funcproto_stackoverflow) {
   istringstream s("char func(int4 a,int8 b,int4 c);");
   PrototypePieces pieces;
   parse_protopieces(pieces,s,glb);
-  pieces.intypes.insert(pieces.intypes.begin(),pieces.outtype);
   vector<ParameterPieces> res;
-  model->assignParameterStorage(pieces.intypes, res, false);
+  model->assignParameterStorage(pieces, res, false);
   ASSERT_EQUALS(res.size(),4);
   ASSERT(register_equal(res[0],"r12"));	// output register
   ASSERT_EQUALS(res[0].type->getName(),"char");
@@ -318,9 +319,8 @@ TEST(funcproto_floatreg) {
   istringstream s("void func(int4 a,float4 b,float4 c,int4 d,float4 d);");
   PrototypePieces pieces;
   parse_protopieces(pieces,s,glb);
-  pieces.intypes.insert(pieces.intypes.begin(),pieces.outtype);
   vector<ParameterPieces> res;
-  model->assignParameterStorage(pieces.intypes, res, false);
+  model->assignParameterStorage(pieces, res, false);
   ASSERT_EQUALS(res.size(),6);
   ASSERT(res[0].addr.isInvalid());
   ASSERT(register_equal(res[1],"r10"));
@@ -338,9 +338,8 @@ TEST(funcproto_floattogeneric) {
   istringstream s("float4 func(int4 a,float4 b,float4 c,float4 d,float4 e,float4 f);");
   PrototypePieces pieces;
   parse_protopieces(pieces,s,glb);
-  pieces.intypes.insert(pieces.intypes.begin(),pieces.outtype);
   vector<ParameterPieces> res;
-  model->assignParameterStorage(pieces.intypes, res, false);
+  model->assignParameterStorage(pieces, res, false);
   ASSERT_EQUALS(res.size(),7);
   ASSERT(register_equal(res[0],"r12"));
   ASSERT_EQUALS(res[0].type->getName(),"float4");
@@ -362,9 +361,8 @@ TEST(funcproto_grouped) {
   istringstream s("float4 func(int4 a,float4 b,float4 c,int4 d,float4 e);");
   PrototypePieces pieces;
   parse_protopieces(pieces,s,glb);
-  pieces.intypes.insert(pieces.intypes.begin(),pieces.outtype);
   vector<ParameterPieces> res;
-  model->assignParameterStorage(pieces.intypes, res, false);
+  model->assignParameterStorage(pieces, res, false);
   ASSERT_EQUALS(res.size(),6);
   ASSERT(register_equal(res[0],"r12"));
   ASSERT_EQUALS(res[0].type->getName(),"float4");
@@ -387,9 +385,8 @@ TEST(funcproto_join) {
   istringstream s("int2 func(int8 a,int4 b,int4 c);");
   PrototypePieces pieces;
   parse_protopieces(pieces,s,glb);
-  pieces.intypes.insert(pieces.intypes.begin(),pieces.outtype);
   vector<ParameterPieces> res;
-  model->assignParameterStorage(pieces.intypes, res, false);
+  model->assignParameterStorage(pieces, res, false);
   ASSERT_EQUALS(res.size(),4);
   ASSERT(register_equal(res[0],"r12"));
   ASSERT_EQUALS(res[0].type->getName(),"int2");
@@ -407,9 +404,8 @@ TEST(funcproto_nojoin) {
   istringstream s("int4 func(int4 a,int8 b,int4 c);");
   PrototypePieces pieces;
   parse_protopieces(pieces,s,glb);
-  pieces.intypes.insert(pieces.intypes.begin(),pieces.outtype);
   vector<ParameterPieces> res;
-  model->assignParameterStorage(pieces.intypes, res, false);
+  model->assignParameterStorage(pieces, res, false);
   ASSERT_EQUALS(res.size(),4);
   ASSERT(register_equal(res[0],"r12"));
   ASSERT_EQUALS(res[0].type->getName(),"int4");
@@ -427,9 +423,8 @@ TEST(funcproto_hiddenreturn) {
   istringstream s("int8 func(int4 a,int4 b);");
   PrototypePieces pieces;
   parse_protopieces(pieces,s,glb);
-  pieces.intypes.insert(pieces.intypes.begin(),pieces.outtype);
   vector<ParameterPieces> res;
-  model->assignParameterStorage(pieces.intypes, res, false);
+  model->assignParameterStorage(pieces, res, false);
   ASSERT_EQUALS(res.size(),4);
   ASSERT(register_equal(res[0],"r12"));		// Pointer to actual return value
   ASSERT_EQUALS(res[0].type->getMetatype(),TYPE_PTR);
@@ -449,9 +444,8 @@ TEST(funcproto_mixedmeta) {
   istringstream s("int4 func(char *a,int4 b,float4 c,int4 *d);");
   PrototypePieces pieces;
   parse_protopieces(pieces,s,glb);
-  pieces.intypes.insert(pieces.intypes.begin(),pieces.outtype);
   vector<ParameterPieces> res;
-  model->assignParameterStorage(pieces.intypes, res, false);
+  model->assignParameterStorage(pieces, res, false);
   ASSERT_EQUALS(res.size(),5);
   ASSERT(register_equal(res[0],"r12"));
   ASSERT(register_equal(res[1],"r1"));
@@ -684,3 +678,5 @@ TEST(funcproto_recovermixedmeta)
   ASSERT(!paramActive.getTrial(4).isUsed());
   ASSERT(register_used(paramActive.getTrial(5),"r10"))
 }
+
+} // End namespace ghidra

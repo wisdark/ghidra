@@ -22,9 +22,9 @@ import java.util.Set;
 
 import org.junit.*;
 
+import db.Transaction;
 import generic.Unique;
 import ghidra.app.plugin.assembler.*;
-import ghidra.app.plugin.core.debug.DebuggerCoordinates;
 import ghidra.app.plugin.core.debug.gui.action.SPLocationTrackingSpec;
 import ghidra.app.plugin.core.debug.gui.listing.DebuggerListingPlugin;
 import ghidra.app.plugin.core.debug.gui.listing.DebuggerListingProvider;
@@ -37,9 +37,14 @@ import ghidra.app.plugin.core.debug.service.tracemgr.DebuggerTraceManagerService
 import ghidra.app.plugin.core.debug.stack.*;
 import ghidra.app.plugin.core.progmgr.ProgramManagerPlugin;
 import ghidra.app.services.*;
-import ghidra.app.services.DebuggerEmulationService.EmulationResult;
 import ghidra.app.services.DebuggerControlService.StateEditor;
+import ghidra.app.services.DebuggerEmulationService.EmulationResult;
 import ghidra.async.AsyncTestUtils;
+import ghidra.dbg.target.schema.SchemaContext;
+import ghidra.dbg.target.schema.TargetObjectSchema.SchemaName;
+import ghidra.dbg.target.schema.XmlSchemaContext;
+import ghidra.debug.api.control.ControlMode;
+import ghidra.debug.api.tracemgr.DebuggerCoordinates;
 import ghidra.framework.model.DomainFolder;
 import ghidra.framework.model.DomainObject;
 import ghidra.pcode.exec.DebuggerPcodeUtils.WatchValue;
@@ -51,9 +56,11 @@ import ghidra.program.model.lang.*;
 import ghidra.program.model.listing.*;
 import ghidra.program.model.listing.Function.FunctionUpdateType;
 import ghidra.program.model.symbol.SourceType;
+import ghidra.program.util.GhidraProgramUtilities;
 import ghidra.program.util.ProgramLocation;
 import ghidra.test.ToyProgramBuilder;
 import ghidra.trace.database.ToyDBTraceBuilder;
+import ghidra.trace.database.target.DBTraceObjectManager;
 import ghidra.trace.model.DefaultTraceLocation;
 import ghidra.trace.model.Lifespan;
 import ghidra.trace.model.breakpoint.TraceBreakpointKind;
@@ -63,7 +70,6 @@ import ghidra.trace.model.thread.TraceThread;
 import ghidra.trace.model.time.schedule.Scheduler;
 import ghidra.util.InvalidNameException;
 import ghidra.util.Msg;
-import ghidra.util.database.UndoableTransaction;
 import ghidra.util.exception.CancelledException;
 import ghidra.util.task.ConsoleTaskMonitor;
 import ghidra.util.task.TaskMonitor;
@@ -113,7 +119,7 @@ public class DebuggerStackPluginScreenShots extends GhidraScreenShotGenerator
 	public void testCaptureDebuggerStackPlugin() throws Throwable {
 		DomainFolder root = tool.getProject().getProjectData().getRootFolder();
 		program = createDefaultProgram("echo", ToyProgramBuilder._X64, this);
-		try (UndoableTransaction tid = UndoableTransaction.start(program, "Populate")) {
+		try (Transaction tx = program.openTransaction("Populate")) {
 			program.setImageBase(addr(program, 0x00400000), true);
 			program.getMemory()
 					.createInitializedBlock(".text", addr(program, 0x00400000), 0x10000, (byte) 0,
@@ -126,11 +132,17 @@ public class DebuggerStackPluginScreenShots extends GhidraScreenShotGenerator
 			fMan.createFunction("FUN_00404300", addr(0x00404300),
 				set(program, 0x00404300, 0x00404400), SourceType.USER_DEFINED);
 		}
+
+		SchemaContext ctx = XmlSchemaContext.deserialize(DebuggerStackProviderTest.CTX_XML);
+
 		long snap;
 		TraceThread thread;
-		try (UndoableTransaction tid = tb.startTransaction()) {
+		try (Transaction tx = tb.startTransaction()) {
+			DBTraceObjectManager om = tb.trace.getObjectManager();
+			om.createRootObject(ctx.getSchema(new SchemaName("Session")));
 			snap = tb.trace.getTimeManager().createSnapshot("First").getKey();
-			thread = tb.getOrAddThread("[1]", snap);
+
+			thread = tb.getOrAddThread("Processes[1].Threads[1]", snap);
 			TraceStack stack = tb.trace.getStackManager().getStack(thread, snap, true);
 			stack.setDepth(3, true);
 
@@ -144,7 +156,7 @@ public class DebuggerStackPluginScreenShots extends GhidraScreenShotGenerator
 		}
 		root.createFile("trace", tb.trace, TaskMonitor.DUMMY);
 		root.createFile("echo", program, TaskMonitor.DUMMY);
-		try (UndoableTransaction tid = tb.startTransaction()) {
+		try (Transaction tx = tb.startTransaction()) {
 			DebuggerStaticMappingUtils.addMapping(
 				new DefaultTraceLocation(tb.trace, null, Lifespan.nowOn(snap), tb.addr(0x00400000)),
 				new ProgramLocation(program, addr(program, 0x00400000)), 0x10000, false);
@@ -153,6 +165,8 @@ public class DebuggerStackPluginScreenShots extends GhidraScreenShotGenerator
 		programManager.openProgram(program);
 		traceManager.openTrace(tb.trace);
 		traceManager.activateThread(thread);
+		traceManager.activateFrame(0);
+		waitForTasks();
 
 		captureIsolatedProvider(DebuggerStackProvider.class, 600, 300);
 	}
@@ -205,7 +219,7 @@ public class DebuggerStackPluginScreenShots extends GhidraScreenShotGenerator
 	protected Function createFibonacciProgramX86_32() throws Throwable {
 		createProgram("x86:LE:32:default", "gcc");
 		intoProject(program);
-		try (UndoableTransaction tid = UndoableTransaction.start(program, "Assemble")) {
+		try (Transaction tx = program.openTransaction("Assemble")) {
 			Address entry = addr(program, 0x00400000);
 			program.getMemory()
 					.createInitializedBlock(".text", entry, 0x1000, (byte) 0, monitor, false);
@@ -284,12 +298,16 @@ public class DebuggerStackPluginScreenShots extends GhidraScreenShotGenerator
 		Function function = createFibonacciProgramX86_32();
 		Address entry = function.getEntryPoint();
 
+		GhidraProgramUtilities.markProgramNotToAskToAnalyze(program);
 		programManager.openProgram(program);
 
 		tb.close();
 		tb = new ToyDBTraceBuilder(
 			ProgramEmulationUtils.launchEmulationTrace(program, entry, this));
 		tb.trace.release(this);
+		DomainFolder root = tool.getProject().getProjectData().getRootFolder();
+		root.createFile("Emulate fibonacci", tb.trace, TaskMonitor.DUMMY);
+
 		TraceThread thread = Unique.assertOne(tb.trace.getThreadManager().getAllThreads());
 		traceManager.openTrace(tb.trace);
 		traceManager.activateThread(thread);
@@ -307,7 +325,7 @@ public class DebuggerStackPluginScreenShots extends GhidraScreenShotGenerator
 		waitOn(frameAtSetup.setReturnAddress(editor, tb.addr(0xdeadbeef)));
 		waitForTasks();
 
-		try (UndoableTransaction tid = tb.startTransaction()) {
+		try (Transaction tx = tb.startTransaction()) {
 			tb.trace.getBreakpointManager()
 					.addBreakpoint("Breakpoints[0]", Lifespan.nowOn(0), retInstr,
 						Set.of(),
@@ -321,7 +339,7 @@ public class DebuggerStackPluginScreenShots extends GhidraScreenShotGenerator
 		traceManager.activateTime(result.schedule());
 		waitForTasks();
 		DebuggerCoordinates tallest = traceManager.getCurrent();
-		try (UndoableTransaction tid = tb.startTransaction()) {
+		try (Transaction tx = tb.startTransaction()) {
 			new UnwindStackCommand(tool, tallest).applyTo(tb.trace, monitor);
 		}
 		waitForDomainObject(tb.trace);

@@ -18,7 +18,8 @@ package ghidra.app.plugin.core.debug.service.emulation;
 import java.util.Map;
 import java.util.concurrent.*;
 
-import ghidra.app.plugin.core.debug.service.emulation.data.PcodeDebuggerDataAccess;
+import generic.ULongSpan.ULongSpanSet;
+import ghidra.debug.api.emulation.PcodeDebuggerDataAccess;
 import ghidra.generic.util.datastruct.SemisparseByteArray;
 import ghidra.pcode.exec.AccessPcodeExecutionException;
 import ghidra.pcode.exec.trace.BytesTracePcodeExecutorStatePiece;
@@ -52,28 +53,17 @@ public abstract class AbstractRWTargetPcodeExecutorStatePiece
 			super(language, space, backing, bytes, written);
 		}
 
-		protected abstract void fillUninitialized(AddressSet uninitialized);
+		protected abstract ULongSpanSet readUninitializedFromTarget(ULongSpanSet uninitialized);
 
 		@Override
-		public byte[] read(long offset, int size, Reason reason) {
-			if (backing != null) {
-				AddressSet uninitialized =
-					addrSet(bytes.getUninitialized(offset, offset + size - 1));
-				if (uninitialized.isEmpty()) {
-					return super.read(offset, size, reason);
-				}
-
-				fillUninitialized(uninitialized);
-
-				AddressSetView unknown = backing.intersectUnknown(
-					addrSet(bytes.getUninitialized(offset, offset + size - 1)));
-				if (!unknown.isEmpty() && reason == Reason.EXECUTE) {
-					warnUnknown(unknown);
-				}
+		protected ULongSpanSet readUninitializedFromBacking(ULongSpanSet uninitialized) {
+			uninitialized = readUninitializedFromTarget(uninitialized);
+			if (uninitialized.isEmpty()) {
+				return uninitialized;
 			}
 
+			return super.readUninitializedFromBacking(uninitialized);
 			// TODO: What to flush when bytes in the trace change?
-			return super.read(offset, size, reason);
 		}
 
 		protected <T> T waitTimeout(CompletableFuture<T> future) {

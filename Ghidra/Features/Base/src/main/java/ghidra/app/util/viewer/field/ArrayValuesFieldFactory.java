@@ -15,13 +15,12 @@
  */
 package ghidra.app.util.viewer.field;
 
-import java.beans.PropertyEditor;
 import java.math.BigInteger;
 
 import docking.widgets.fieldpanel.field.*;
 import docking.widgets.fieldpanel.support.FieldLocation;
 import docking.widgets.fieldpanel.support.RowColLocation;
-import ghidra.app.util.HighlightProvider;
+import ghidra.app.util.ListingHighlightProvider;
 import ghidra.app.util.viewer.format.FieldFormatModel;
 import ghidra.app.util.viewer.format.FormatManager;
 import ghidra.app.util.viewer.proxy.ProxyObj;
@@ -35,7 +34,6 @@ import ghidra.util.exception.AssertException;
 public class ArrayValuesFieldFactory extends FieldFactory {
 	public static final String FIELD_NAME = "Array Values";
 	private int valuesPerLine;
-	private PropertyEditor arrayOptionsEditor = new ArrayElementPropertyEditor();
 
 	public ArrayValuesFieldFactory() {
 		super(FIELD_NAME);
@@ -43,7 +41,7 @@ public class ArrayValuesFieldFactory extends FieldFactory {
 
 	@Override
 	public FieldFactory newInstance(FieldFormatModel formatModel,
-			HighlightProvider highlightProvider, ToolOptions toolOptions,
+			ListingHighlightProvider highlightProvider, ToolOptions toolOptions,
 			ToolOptions fieldOptions) {
 		return new ArrayValuesFieldFactory(formatModel, highlightProvider, toolOptions,
 			fieldOptions);
@@ -56,7 +54,7 @@ public class ArrayValuesFieldFactory extends FieldFactory {
 	 * @param displayOptions the Options for display properties.
 	 * @param fieldOptions the Options for field specific properties.
 	 */
-	private ArrayValuesFieldFactory(FieldFormatModel model, HighlightProvider hlProvider,
+	private ArrayValuesFieldFactory(FieldFormatModel model, ListingHighlightProvider hlProvider,
 			Options displayOptions, Options fieldOptions) {
 		super(FIELD_NAME, model, hlProvider, displayOptions, fieldOptions);
 		setupOptions(fieldOptions);
@@ -66,7 +64,7 @@ public class ArrayValuesFieldFactory extends FieldFactory {
 		// we need to install a custom editor that allows us to edit a group of related options
 		fieldOptions.registerOption(FormatManager.ARRAY_DISPLAY_OPTIONS, OptionType.CUSTOM_TYPE,
 			new ArrayElementWrappedOption(), null, FormatManager.ARRAY_DISPLAY_DESCRIPTION,
-			arrayOptionsEditor);
+			() -> new ArrayElementPropertyEditor());
 		CustomOption wrappedOption = fieldOptions.getCustomOption(
 			FormatManager.ARRAY_DISPLAY_OPTIONS, new ArrayElementWrappedOption());
 

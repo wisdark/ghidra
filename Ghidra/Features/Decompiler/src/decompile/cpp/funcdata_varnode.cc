@@ -15,6 +15,8 @@
  */
 #include "funcdata.hh"
 
+namespace ghidra {
+
 // Funcdata members pertaining directly to varnodes
 
 /// Properties of a given storage location are gathered from symbol information and
@@ -370,6 +372,36 @@ Varnode *Funcdata::setInputVarnode(Varnode *vn)
   return vn;
 }
 
+/// Construct a constant Varnode up to 128 bits,  using INT_ZEXT and PIECE if necessary.
+/// This method is temporary until we have full extended precision constants.
+/// \param s is the size of the Varnode in bytes
+/// \param val is the 128-bit value in 2 64-bit chunks
+/// \param op is point before which any new PcodeOp should get inserted
+/// \return the new effective constant Varnode
+Varnode *Funcdata::newExtendedConstant(int4 s,uint8 *val,PcodeOp *op)
+
+{
+  if (s <= 8)
+    return newConstant(s, val[0]);
+  Varnode *newConstVn;
+  if (val[1] == 0) {
+    PcodeOp *extOp = newOp(1,op->getAddr());
+    opSetOpcode(extOp,CPUI_INT_ZEXT);
+    newConstVn = newUniqueOut(s,extOp);
+    opSetInput(extOp,newConstant(8,val[0]),0);
+    opInsertBefore(extOp,op);
+  }
+  else {
+    PcodeOp *pieceOp = newOp(2,op->getAddr());
+    opSetOpcode(pieceOp,CPUI_PIECE);
+    newConstVn = newUniqueOut(s,pieceOp);
+    opSetInput(pieceOp,newConstant(8,val[1]),0);	// Most significant piece
+    opSetInput(pieceOp,newConstant(8,val[0]),1);	// Least significant piece
+    opInsertBefore(pieceOp,op);
+  }
+  return newConstVn;
+}
+
 /// \brief Adjust input Varnodes contained in the given range
 ///
 /// After this call, a single \e input Varnode will exist that fills the given range.
@@ -600,7 +632,7 @@ bool Funcdata::replaceVolatile(Varnode *vn)
 {
   PcodeOp *newop;
   if (vn->isWritten()) {	// A written value
-    VolatileWriteOp *vw_op = glb->userops.getVolatileWrite();
+    UserPcodeOp *vw_op = glb->userops.registerBuiltin(UserPcodeOp::BUILTIN_VOLATILE_WRITE);
     if (!vn->hasNoDescend()) throw LowlevelError("Volatile memory was propagated");
     PcodeOp *defop = vn->getDef();
     newop = newOp(3,defop->getAddr());
@@ -619,7 +651,7 @@ bool Funcdata::replaceVolatile(Varnode *vn)
     opInsertAfter(newop,defop); // Insert after defining op
   }
   else {			// A read value
-    VolatileReadOp *vr_op = glb->userops.getVolatileRead();
+    UserPcodeOp *vr_op = glb->userops.registerBuiltin(UserPcodeOp::BUILTIN_VOLATILE_READ);
     if (vn->hasNoDescend()) return false; // Dead
     PcodeOp *readop = vn->loneDescend();
     if (readop == (PcodeOp *)0)
@@ -869,24 +901,6 @@ bool Funcdata::syncVarnodesWithSymbols(const ScopeLocal *lm,bool updateDatatypes
   return updateoccurred;
 }
 
-/// If the Varnode is a partial of a Symbol with a \e union data-type component, we assign
-/// a partial union data-type (TypePartialUnion) to the Varnode, so that facing resolutions
-/// can be provided.
-/// \param vn is the given Varnode
-/// \return the partial data-type or null
-Datatype *Funcdata::checkSymbolType(Varnode *vn)
-
-{
-  if (vn->isTypeLock()) return vn->getType();
-  SymbolEntry *entry = vn->getSymbolEntry();
-  Symbol *sym = entry->getSymbol();
-  Datatype *curType = sym->getType();
-  if (curType->getSize() == vn->getSize())
-    return (Datatype *)0;
-  int4 curOff = (vn->getAddr().getOffset() - entry->getAddr().getOffset()) + entry->getOffset();
-  return glb->types->getExactPiece(curType, curOff, vn->getSize());
-}
-
 /// A Varnode overlaps the given SymbolEntry.  Make sure the Varnode is part of the variable
 /// underlying the Symbol.  If not, remap things so that the Varnode maps to a distinct Symbol.
 /// In either case, attach the appropriate Symbol to the Varnode
@@ -988,7 +1002,6 @@ bool Funcdata::syncVarnodesWithSymbol(VarnodeLocSet::const_iterator &iter,uint4 
     if (ct != (Datatype *)0) {
       if (vn->updateType(ct,false,false))
 	updateoccurred = true;
-      vn->getHigh()->finalizeDatatype(ct);	// Permanently set the data-type on the HighVariable
     }
   } while(iter != enditer);
   return updateoccurred;
@@ -1037,9 +1050,13 @@ void Funcdata::linkProtoPartial(Varnode *vn)
   Varnode *rootVn = PieceNode::findRoot(vn);
   if (rootVn == vn) return;
 
-  Varnode *nameRep = rootVn->getHigh()->getNameRepresentative();
+  HighVariable *rootHigh = rootVn->getHigh();
+  if (!rootHigh->isSameGroup(high))
+    return;
+  Varnode *nameRep = rootHigh->getNameRepresentative();
   Symbol *sym = linkSymbol(nameRep);
   if (sym == (Symbol *)0) return;
+  rootHigh->establishGroupSymbolOffset();
   SymbolEntry *entry = sym->getFirstWholeMap();
   vn->setSymbolEntry(entry);
 }
@@ -1291,6 +1308,75 @@ bool Funcdata::attemptDynamicMappingLate(SymbolEntry *entry,DynamicHash &dhash)
     warningHeader(s.str());
     localmap->retypeSymbol(sym,vn->getType()); // use the type propagated into the varnode
   }
+  return true;
+}
+
+/// \brief Create Varnode (and associated PcodeOp) that will display as a string constant
+///
+/// The raw data for the encoded string is given. If the data encodes a legal string, the string
+/// is stored in the StringManager, and a Varnode is created that will display in output as the
+/// quoted string.  A given pointer data-type is assigned to the new Varnode and also indicates
+/// the character data-type associated with the encoding. Internally, a \e stringdata user-op is
+/// also created and its output is the Varnode actually returned.
+/// \param buf is the raw bytes of the encoded string
+/// \param size is the number of bytes
+/// \param ptrType is the given pointer to character data-type
+/// \param readOp is the PcodeOp that will read the new Varnode
+/// \return the new Varnode or null is the encoding isn't a legal string
+Varnode *Funcdata::getInternalString(const uint1 *buf,int4 size,Datatype *ptrType,PcodeOp *readOp)
+
+{
+  if (ptrType->getMetatype() != TYPE_PTR)
+    return (Varnode *)0;
+  Datatype *charType = ((TypePointer *)ptrType)->getPtrTo();
+
+  const Address &addr(readOp->getAddr());
+  uint8 hash = glb->stringManager->registerInternalStringData(addr, buf, size, charType);
+  if (hash == 0)
+    return (Varnode *)0;
+  glb->userops.registerBuiltin(UserPcodeOp::BUILTIN_STRINGDATA);
+  PcodeOp *stringOp = newOp(2,addr);
+  opSetOpcode(stringOp, CPUI_CALLOTHER);
+  stringOp->clearFlag(PcodeOp::call);
+  opSetInput(stringOp, newConstant(4, UserPcodeOp::BUILTIN_STRINGDATA), 0);
+  opSetInput(stringOp, newConstant(8, hash), 1);
+  Varnode *resVn = newUniqueOut(ptrType->getSize(), stringOp);
+  resVn->updateType(ptrType, true, false);
+  opInsertBefore(stringOp, readOp);
+  return resVn;
+};
+
+/// Follow the Varnode back to see if it comes from the return address for \b this function.
+/// If so, return \b true.  The return address can flow through COPY, INDIRECT, and AND operations.
+/// If there are any other operations in the flow path, or if a standard storage location for the
+/// return address was not defined, return \b false.
+/// \param vn is the given Varnode to trace
+/// \return \b true if flow is from the return address
+bool Funcdata::testForReturnAddress(Varnode *vn)
+
+{
+  VarnodeData &retaddr(glb->defaultReturnAddr);
+  if (retaddr.space == (AddrSpace *)0)
+    return false;			// No standard storage location to compare to
+  while(vn->isWritten()) {
+    PcodeOp *op = vn->getDef();
+    OpCode opc = op->code();
+    if (opc == CPUI_INDIRECT || opc == CPUI_COPY) {
+      vn = op->getIn(0);
+    }
+    else if (opc == CPUI_INT_AND) {
+      // We only want to allow "alignment" style masking
+      if (!op->getIn(1)->isConstant())
+	return false;
+      vn = op->getIn(0);
+    }
+    else
+      return false;
+  }
+  if (vn->getSpace() != retaddr.space || vn->getOffset() != retaddr.offset || vn->getSize() != retaddr.size)
+    return false;
+  if (!vn->isInput())
+    return false;
   return true;
 }
 
@@ -1920,6 +2006,8 @@ int4 AncestorRealistic::enterNode(void)
 	if (!vn->isDirectWrite())
 	  return pop_fail;
       }
+      if (op->isStoreUnmapped())
+	return pop_fail;
       op = vn->getDef();
       if (op == (PcodeOp *)0) break;
       OpCode opc = op->code();
@@ -2060,3 +2148,5 @@ bool AncestorRealistic::execute(PcodeOp *op,int4 slot,ParamTrial *t,bool allowFa
   }
   return false;
 }
+
+} // End namespace ghidra

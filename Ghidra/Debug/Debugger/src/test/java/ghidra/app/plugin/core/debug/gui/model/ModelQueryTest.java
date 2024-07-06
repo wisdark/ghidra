@@ -15,22 +15,21 @@
  */
 package ghidra.app.plugin.core.debug.gui.model;
 
-import static ghidra.app.plugin.core.debug.gui.model.DebuggerModelProviderTest.CTX;
-import static org.junit.Assert.assertFalse;
-import static org.junit.Assert.assertTrue;
+import static ghidra.app.plugin.core.debug.gui.model.DebuggerModelProviderTest.*;
+import static org.junit.Assert.*;
 
 import org.junit.Test;
 
-import ghidra.app.plugin.core.debug.gui.AbstractGhidraHeadedDebuggerGUITest;
+import db.Transaction;
+import ghidra.app.plugin.core.debug.gui.AbstractGhidraHeadedDebuggerTest;
 import ghidra.dbg.target.schema.TargetObjectSchema.SchemaName;
 import ghidra.trace.database.target.DBTraceObjectManager;
 import ghidra.trace.model.Lifespan;
 import ghidra.trace.model.target.TraceObject.ConflictResolution;
 import ghidra.trace.model.target.TraceObjectKeyPath;
 import ghidra.trace.model.target.TraceObjectValue;
-import ghidra.util.database.UndoableTransaction;
 
-public class ModelQueryTest extends AbstractGhidraHeadedDebuggerGUITest {
+public class ModelQueryTest extends AbstractGhidraHeadedDebuggerTest {
 	@Test
 	public void testIncludes() throws Throwable {
 		createTrace();
@@ -38,7 +37,7 @@ public class ModelQueryTest extends AbstractGhidraHeadedDebuggerGUITest {
 		ModelQuery rootQuery = ModelQuery.parse("");
 		ModelQuery threadQuery = ModelQuery.parse("Processes[].Threads[]");
 
-		try (UndoableTransaction tid = tb.startTransaction()) {
+		try (Transaction tx = tb.startTransaction()) {
 			DBTraceObjectManager objects = tb.trace.getObjectManager();
 
 			TraceObjectValue rootVal =
@@ -65,7 +64,7 @@ public class ModelQueryTest extends AbstractGhidraHeadedDebuggerGUITest {
 		ModelQuery rootQuery = ModelQuery.parse("");
 		ModelQuery threadQuery = ModelQuery.parse("Processes[].Threads[]");
 
-		try (UndoableTransaction tid = tb.startTransaction()) {
+		try (Transaction tx = tb.startTransaction()) {
 			DBTraceObjectManager objects = tb.trace.getObjectManager();
 
 			TraceObjectValue rootVal =

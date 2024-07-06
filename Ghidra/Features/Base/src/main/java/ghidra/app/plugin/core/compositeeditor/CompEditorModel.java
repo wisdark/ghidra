@@ -92,14 +92,24 @@ public abstract class CompEditorModel extends CompositeEditorModel {
 			throw new IllegalStateException(
 				"Can't apply edits without a data type or data type manager.");
 		}
-		int transactionID = originalDTM.startTransaction("Edit " + getCompositeName());
+		boolean originalDtExists = originalDTM.contains(originalDt);
+		boolean renamed = false;
+		if (originalDtExists) {
+			String origName = originalDt.getName();
+			String editName = getCompositeName();
+			renamed = !origName.equals(editName);
+		}
+		String action = originalDtExists ? "Edit" : "Create";
+		if (renamed) {
+			action += "/Rename";
+		}
+		String type = (originalDt instanceof Union) ? " Union " : " Structure ";
+		int transactionID = originalDTM.startTransaction(action + type + getCompositeName());
 		try {
-			if (originalDTM.contains(originalDt)) {
-
+			if (originalDtExists) {
 				// Update the original structure.
-				String origName = originalDt.getName();
-				String editName = getCompositeName();
-				if (!origName.equals(editName)) {
+				if (renamed) {
+					String editName = getCompositeName();
 					try {
 						originalDt.setName(editName);
 					}
@@ -414,7 +424,7 @@ public abstract class CompEditorModel extends CompositeEditorModel {
 
 		monitor.initialize(entries);
 		for (int rowIndex = endRowIndex; rowIndex >= startRowIndex; rowIndex--) {
-			monitor.checkCanceled();
+			monitor.checkCancelled();
 			int componentOrdinal = convertRowToOrdinal(rowIndex);
 			ordinals.add(componentOrdinal);
 			if (componentOrdinal < row) {
@@ -663,7 +673,8 @@ public abstract class CompEditorModel extends CompositeEditorModel {
 	 * @throws UsrException if add fails
 	 */
 	public DataTypeComponent replace(int rowIndex, DataType dt) throws UsrException {
-		DataTypeInstance dti = DataTypeHelper.getFixedLength(this, rowIndex, dt);
+		DataTypeInstance dti =
+			DataTypeHelper.getFixedLength(this, rowIndex, dt, usesAlignedLengthComponents());
 		if (dti == null) {
 			return null; // User cancelled from size dialog.
 		}
@@ -1254,13 +1265,19 @@ public abstract class CompEditorModel extends CompositeEditorModel {
 	}
 
 	@Override
-	public void setComponentName(int rowIndex, String name)
-			throws InvalidInputException, InvalidNameException, DuplicateNameException {
+	public boolean setComponentName(int rowIndex, String name) throws InvalidNameException {
+
+		String oldName = getComponent(rowIndex).getFieldName();
+		if (Objects.equals(oldName, name)) {
+			return false;
+		}
+
 		if (nameExistsElsewhere(name, rowIndex)) {
 			throw new InvalidNameException("Name \"" + name + "\" already exists.");
 		}
 		try {
 			getComponent(rowIndex).setFieldName(name); // setFieldName handles trimming
+			return true;
 		}
 		catch (DuplicateNameException exc) {
 			throw new InvalidNameException(exc.getMessage());
@@ -1268,13 +1285,22 @@ public abstract class CompEditorModel extends CompositeEditorModel {
 	}
 
 	@Override
-	public void setComponentComment(int rowIndex, String comment) throws InvalidInputException {
-		if (comment.equals("")) {
-			comment = null;
+	public boolean setComponentComment(int rowIndex, String comment) {
+
+		String oldComment = getComponent(rowIndex).getComment();
+		String newComment = comment;
+		if (newComment.equals("")) {
+			newComment = null;
 		}
-		getComponent(rowIndex).setComment(comment);
+
+		if (Objects.equals(oldComment, newComment)) {
+			return false;
+		}
+
+		getComponent(rowIndex).setComment(newComment);
 		fireTableCellUpdated(rowIndex, getCommentColumn());
 		componentDataChanged();
+		return true;
 	}
 
 	/**

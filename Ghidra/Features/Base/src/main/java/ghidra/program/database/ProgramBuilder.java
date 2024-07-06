@@ -93,7 +93,7 @@ public class ProgramBuilder {
 	 * Construct program builder using the big-endian Toy language and default compiler spec.
 	 * This builder object will be the program consumer and must be disposed to properly
 	 * release the program.
-	 * @throws Exception if there is an exception creating the program 
+	 * @throws Exception if there is an exception creating the program
 	 */
 	public ProgramBuilder() throws Exception {
 		this("Test Program", _TOY);
@@ -136,21 +136,20 @@ public class ProgramBuilder {
 		CompilerSpec compilerSpec = compilerSpecID == null ? language.getDefaultCompilerSpec()
 				: language.getCompilerSpecByID(new CompilerSpecID(compilerSpecID));
 		program = new ProgramDB(name, language, compilerSpec, consumer == null ? this : consumer);
-		setAnalyzed(true);
+		setAnalyzed();
 		program.setTemporary(true); // ignore changes
 	}
-	
+
 	/**
 	 * Construct program builder using a full language object rather than a language id string
 	 * @param name program name
 	 * @param language Language object
 	 * @throws Exception if there is an exception creating the program
 	 */
-	public ProgramBuilder(String name, Language language)
-			throws Exception {
+	public ProgramBuilder(String name, Language language) throws Exception {
 		CompilerSpec compilerSpec = language.getDefaultCompilerSpec();
 		program = new ProgramDB(name, language, compilerSpec, this);
-		setAnalyzed(true);
+		setAnalyzed();
 		program.setTemporary(true); // ignore changes
 	}
 
@@ -279,12 +278,11 @@ public class ProgramBuilder {
 		AbstractGenericTest.setInstanceField("recordChanges", program, Boolean.valueOf(enabled));
 	}
 
-	/** 
+	/**
 	 * This prevents the 'ask to analyze' dialog from showing when called with {@code true}
-	 * @param analyzed true to mark the program as analyzed
 	 */
-	public void setAnalyzed(boolean analyzed) {
-		GhidraProgramUtilities.setAnalyzedFlag(program, analyzed);
+	public void setAnalyzed() {
+		GhidraProgramUtilities.markProgramAnalyzed(program);
 	}
 
 	public MemoryBlock createMemory(String name, String address, int size) {
@@ -412,7 +410,7 @@ public class ProgramBuilder {
 			DisassembleCommand cmd = new DisassembleCommand(addresses, addresses, followFlows);
 
 			cmd.applyTo(program);
-			AutoAnalysisManager.getAnalysisManager(program).startAnalysis(TaskMonitor.DUMMY);
+			AutoAnalysisManager.getAnalysisManager(program).startAnalysis(TaskMonitor.DUMMY, false);
 		});
 	}
 
@@ -420,7 +418,7 @@ public class ProgramBuilder {
 		tx(() -> {
 			DisassembleCommand cmd = new DisassembleCommand(set, set, true);
 			cmd.applyTo(program);
-			AutoAnalysisManager.getAnalysisManager(program).startAnalysis(TaskMonitor.DUMMY);
+			AutoAnalysisManager.getAnalysisManager(program).startAnalysis(TaskMonitor.DUMMY, false);
 		});
 	}
 
@@ -428,7 +426,7 @@ public class ProgramBuilder {
 		tx(() -> {
 			DisassembleCommand cmd = new DisassembleCommand(set, set, followFlows);
 			cmd.applyTo(program);
-			AutoAnalysisManager.getAnalysisManager(program).startAnalysis(TaskMonitor.DUMMY);
+			AutoAnalysisManager.getAnalysisManager(program).startAnalysis(TaskMonitor.DUMMY, false);
 		});
 	}
 
@@ -438,7 +436,7 @@ public class ProgramBuilder {
 			DisassembleCommand cmd = new ArmDisassembleCommand(address,
 				new AddressSet(address, address.add(length - 1)), true);
 			cmd.applyTo(program);
-			AutoAnalysisManager.getAnalysisManager(program).startAnalysis(TaskMonitor.DUMMY);
+			AutoAnalysisManager.getAnalysisManager(program).startAnalysis(TaskMonitor.DUMMY, false);
 		});
 	}
 
@@ -643,7 +641,7 @@ public class ProgramBuilder {
 
 	public void applyFixedLengthDataType(String addressString, DataType dt, int length) {
 		tx(() -> {
-			DataUtilities.createData(program, addr(addressString), dt, length, false,
+			DataUtilities.createData(program, addr(addressString), dt, length,
 				ClearDataMode.CLEAR_ALL_CONFLICT_DATA);
 		});
 	}
@@ -654,6 +652,7 @@ public class ProgramBuilder {
 
 	/**
 	 * Creates a data instance at the specified address, repeated {@code N} times.
+	 * Any conflicting Data will be overwritten.
 	 *
 	 * @param addressString address.
 	 * @param dt {@link DataType} to place at address, {@link Dynamic} length datatype not supported.
@@ -663,7 +662,7 @@ public class ProgramBuilder {
 		tx(() -> {
 			Address address = addr(addressString);
 			for (int i = 0; i < n; i++) {
-				CreateDataCmd cmd = new CreateDataCmd(address, dt);
+				CreateDataCmd cmd = new CreateDataCmd(address, true, dt);
 				if (!cmd.applyTo(program)) {
 					throw new AssertException(
 						"Could not apply data at address " + address + ". " + cmd.getStatusMsg());
@@ -688,7 +687,7 @@ public class ProgramBuilder {
 			int previousDataLength = 0;
 			for (int i = 0; i < n; i++) {
 				address = address.addNoWrap(previousDataLength);
-				Data newStringInstance = DataUtilities.createData(program, address, dt, -1, false,
+				Data newStringInstance = DataUtilities.createData(program, address, dt, -1,
 					ClearDataMode.CLEAR_SINGLE_DATA);
 				previousDataLength = newStringInstance.getLength();
 			}
@@ -830,7 +829,7 @@ public class ProgramBuilder {
 			startTransaction();
 			try {
 				Data data = DataUtilities.createData(program, addr, dataType, stringBytes.length,
-					false, ClearDataMode.CLEAR_ALL_UNDEFINED_CONFLICT_DATA);
+					ClearDataMode.CLEAR_ALL_UNDEFINED_CONFLICT_DATA);
 				CharsetSettingsDefinition.CHARSET.setCharset(data, charset.name());
 				return data;
 			}

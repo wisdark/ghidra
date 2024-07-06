@@ -60,7 +60,7 @@ public class ImporterUtilities {
 	 * TODO: will be refactored to use file_extension_icon.xml file info.
 	 */
 	public static final GhidraFileFilter LOADABLE_FILES_FILTER = ExtensionFileFilter.forExtensions(
-		"Loadable files", "exe", "dll", "obj", "drv", "bin", "o", "a", "so", "class", "lib");
+		"Loadable files", "exe", "dll", "obj", "drv", "bin", "hex", "o", "a", "so", "class", "lib");
 
 	/**
 	 * File extension filter for well known 'container' files for GhidraFileChoosers.
@@ -230,6 +230,13 @@ public class ImporterUtilities {
 
 		Objects.requireNonNull(monitor);
 
+		// Don't allow Add To Program while "things are happening" to the program
+		if (!program.canLock()) {
+			Msg.showWarn(null, null, "Add To Program",
+				"Cannot Add To Program while program is locked.  Please wait or stop running tasks.");
+			return;
+		}
+
 		try {
 			ByteProvider provider = fsService.getByteProvider(fsrl, false, monitor);
 			if (provider.length() == 0) {
@@ -240,7 +247,7 @@ public class ImporterUtilities {
 			}
 
 			LoaderMap loaderMap = LoaderService.getSupportedLoadSpecs(provider,
-				loader -> loader.supportsLoadIntoProgram());
+				loader -> loader.supportsLoadIntoProgram(program));
 
 			SystemUtilities.runSwingLater(() -> {
 				AddToProgramDialog dialog =
@@ -279,8 +286,8 @@ public class ImporterUtilities {
 			LoaderMap loaderMap = LoaderService.getAllSupportedLoadSpecs(provider);
 
 			SystemUtilities.runSwingLater(() -> {
-				ImporterDialog importerDialog =
-					new ImporterDialog(tool, programManager, loaderMap, provider, suggestedPath);
+				ImporterDialog importerDialog = new ImporterDialog(tool, programManager, loaderMap,
+					provider, suggestedPath);
 				if (destinationFolder != null) {
 					importerDialog.setDestinationFolder(destinationFolder);
 				}
@@ -410,7 +417,7 @@ public class ImporterUtilities {
 		boolean firstProgram = true;
 		Set<DomainFile> importedFilesSet = new HashSet<>();
 		for (Loaded<? extends DomainObject> loaded : loadResults) {
-			monitor.checkCanceled();
+			monitor.checkCancelled();
 
 			if (loaded.getDomainObject() instanceof Program program) {
 				ProgramMappingService.createAssociation(fsrl, program);
@@ -427,6 +434,11 @@ public class ImporterUtilities {
 				// currently we only show results for the imported program, not any libraries
 				displayResults(pluginTool, loaded.getDomainObject(),
 					loaded.getDomainObject().getDomainFile(), importMessages);
+
+				// Optionally echo loader message log to application.log
+				if (!Loader.loggingDisabled && !importMessages.isEmpty()) {
+					Msg.info(ImporterUtilities.class, "Additional info:\n" + importMessages);
+				}
 			}
 			loaded.release(consumer);
 			firstProgram = false;
@@ -452,6 +464,11 @@ public class ImporterUtilities {
 		try (ByteProvider bp = fsService.getByteProvider(fsrl, false, monitor)) {
 			loadSpec.getLoader().loadInto(bp, loadSpec, options, messageLog, program, monitor);
 			displayResults(tool, program, program.getDomainFile(), messageLog.toString());
+
+			// Optionally echo loader message log to application.log
+			if (!Loader.loggingDisabled && messageLog.hasMessages()) {
+				Msg.info(ImporterUtilities.class, "Additional info:\n" + messageLog.toString());
+			}
 		}
 		catch (CancelledException e) {
 			return;

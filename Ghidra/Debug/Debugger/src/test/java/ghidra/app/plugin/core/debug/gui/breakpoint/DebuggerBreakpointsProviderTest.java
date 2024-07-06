@@ -27,10 +27,11 @@ import org.junit.Before;
 import org.junit.Test;
 import org.junit.experimental.categories.Category;
 
+import db.Transaction;
 import docking.widgets.table.RowWrappedEnumeratedColumnTableModel;
 import generic.Unique;
 import generic.test.category.NightlyCategory;
-import ghidra.app.plugin.core.debug.gui.AbstractGhidraHeadedDebuggerGUITest;
+import ghidra.app.plugin.core.debug.gui.AbstractGhidraHeadedDebuggerTest;
 import ghidra.app.plugin.core.debug.gui.DebuggerResources.*;
 import ghidra.app.plugin.core.debug.gui.breakpoint.DebuggerBreakpointsProvider.LogicalBreakpointTableModel;
 import ghidra.app.plugin.core.debug.gui.console.DebuggerConsolePlugin;
@@ -38,10 +39,14 @@ import ghidra.app.plugin.core.debug.service.control.DebuggerControlServicePlugin
 import ghidra.app.plugin.core.debug.service.emulation.ProgramEmulationUtils;
 import ghidra.app.plugin.core.debug.service.modules.DebuggerStaticMappingUtils;
 import ghidra.app.services.*;
-import ghidra.app.services.LogicalBreakpoint.State;
 import ghidra.dbg.model.TestTargetProcess;
 import ghidra.dbg.target.TargetBreakpointSpec.TargetBreakpointKind;
 import ghidra.dbg.target.TargetBreakpointSpecContainer;
+import ghidra.debug.api.action.ActionSource;
+import ghidra.debug.api.breakpoint.LogicalBreakpoint;
+import ghidra.debug.api.breakpoint.LogicalBreakpoint.State;
+import ghidra.debug.api.control.ControlMode;
+import ghidra.debug.api.model.TraceRecorder;
 import ghidra.framework.store.LockException;
 import ghidra.program.model.address.Address;
 import ghidra.program.model.address.AddressOverflowException;
@@ -52,13 +57,11 @@ import ghidra.trace.model.*;
 import ghidra.trace.model.breakpoint.TraceBreakpoint;
 import ghidra.trace.model.time.TraceSnapshot;
 import ghidra.util.SystemUtilities;
-import ghidra.util.database.UndoableTransaction;
 import ghidra.util.exception.CancelledException;
-import ghidra.util.exception.DuplicateNameException;
 import ghidra.util.task.TaskMonitor;
 
 @Category(NightlyCategory.class) // this may actually be an @PortSensitive test
-public class DebuggerBreakpointsProviderTest extends AbstractGhidraHeadedDebuggerGUITest {
+public class DebuggerBreakpointsProviderTest extends AbstractGhidraHeadedDebuggerTest {
 	protected static final long TIMEOUT_MILLIS =
 		SystemUtilities.isInTestingBatchMode() ? 5000 : Long.MAX_VALUE;
 
@@ -75,14 +78,8 @@ public class DebuggerBreakpointsProviderTest extends AbstractGhidraHeadedDebugge
 		breakpointService = tool.getService(DebuggerLogicalBreakpointService.class);
 	}
 
-	protected void waitAndFlush(TraceRecorder recorder) throws Throwable {
-		waitOn(recorder.getTarget().getModel().flushEvents());
-		waitOn(recorder.flushTransactions());
-		waitForDomainObject(recorder.getTrace());
-	}
-
 	protected void addMapping(Trace trace, Program prog) throws Exception {
-		try (UndoableTransaction tid = UndoableTransaction.start(trace, "Add mapping")) {
+		try (Transaction tx = trace.openTransaction("Add mapping")) {
 			DebuggerStaticMappingUtils.addMapping(
 				new DefaultTraceLocation(trace, null, Lifespan.nowOn(0), addr(trace, 0x55550000)),
 				new ProgramLocation(prog, addr(prog, 0x00400000)), 0x1000, false);
@@ -101,16 +98,15 @@ public class DebuggerBreakpointsProviderTest extends AbstractGhidraHeadedDebugge
 				.get(TIMEOUT_MILLIS, TimeUnit.MILLISECONDS);
 	}
 
-	protected void addStaticMemoryAndBreakpoint() throws LockException, DuplicateNameException,
-			MemoryConflictException, AddressOverflowException, CancelledException {
-		try (UndoableTransaction tid =
-			UndoableTransaction.start(program, "Add bookmark break")) {
+	protected void addStaticMemoryAndBreakpoint() throws LockException, MemoryConflictException,
+			AddressOverflowException, CancelledException {
+		try (Transaction tx = program.openTransaction("Add bookmark break")) {
 			program.getMemory()
 					.createInitializedBlock(".text", addr(program, 0x00400000), 0x1000, (byte) 0,
 						TaskMonitor.DUMMY, false);
 			program.getBookmarkManager()
-					.setBookmark(addr(program, 0x00400123),
-						LogicalBreakpoint.BREAKPOINT_ENABLED_BOOKMARK_TYPE, "SW_EXECUTE;1", "");
+					.setBookmark(addr(program, 0x00400123), LogicalBreakpoint.ENABLED_BOOKMARK_TYPE,
+						"SW_EXECUTE;1", "");
 		}
 	}
 
@@ -133,8 +129,7 @@ public class DebuggerBreakpointsProviderTest extends AbstractGhidraHeadedDebugge
 		Trace trace = recorder.getTrace();
 
 		addLiveMemoryAndBreakpoint(mb.testProcess1, recorder);
-		waitOn(mb.testModel.flushEvents());
-		waitForDomainObject(trace);
+		waitRecorder(recorder);
 
 		// NB, optionally open trace. Mapping only works if open...
 		traceManager.openTrace(trace);
@@ -250,7 +245,7 @@ public class DebuggerBreakpointsProviderTest extends AbstractGhidraHeadedDebugge
 
 		// NOTE: This acts on the corresponding target, not directly on trace
 		waitOn(lb.disableForTrace(trace));
-		waitAndFlush(recorder);
+		waitRecorder(recorder);
 
 		waitForPass(() -> assertEquals(State.DISABLED, row.getState()));
 
@@ -261,7 +256,7 @@ public class DebuggerBreakpointsProviderTest extends AbstractGhidraHeadedDebugge
 
 		// This duplicates the initial case, but without it, I just feel incomplete
 		waitOn(lb.enableForTrace(trace));
-		waitAndFlush(recorder);
+		waitRecorder(recorder);
 
 		waitForPass(() -> assertEquals(State.ENABLED, row.getState()));
 	}
@@ -705,9 +700,9 @@ public class DebuggerBreakpointsProviderTest extends AbstractGhidraHeadedDebugge
 
 		// Do our own launch, so that object mode is enabled during load (region creation)
 		createTrace(program.getLanguageID().getIdAsString());
-		try (UndoableTransaction startTransaction = tb.startTransaction()) {
+		try (Transaction startTransaction = tb.startTransaction()) {
 			TraceSnapshot initial = tb.trace.getTimeManager().getSnapshot(0, true);
-			ProgramEmulationUtils.loadExecutable(initial, program);
+			ProgramEmulationUtils.loadExecutable(initial, program, List.of());
 			Address pc = program.getMinAddress();
 			ProgramEmulationUtils.doLaunchEmulationThread(tb.trace, 0, program, pc, pc);
 		}

@@ -26,18 +26,22 @@ import org.junit.Before;
 import org.junit.Test;
 import org.junit.experimental.categories.Category;
 
+import db.Transaction;
 import generic.Unique;
 import generic.test.category.NightlyCategory;
 import ghidra.app.plugin.assembler.*;
 import ghidra.app.plugin.core.codebrowser.CodeBrowserPlugin;
-import ghidra.app.plugin.core.debug.DebuggerCoordinates;
-import ghidra.app.plugin.core.debug.gui.AbstractGhidraHeadedDebuggerGUITest;
-import ghidra.app.plugin.core.debug.mapping.DebuggerPlatformMapper;
+import ghidra.app.plugin.core.debug.gui.AbstractGhidraHeadedDebuggerTest;
 import ghidra.app.plugin.core.debug.mapping.DebuggerPlatformOpinion;
+import ghidra.app.plugin.core.debug.service.emulation.data.DefaultPcodeDebuggerAccess;
 import ghidra.app.plugin.core.debug.service.platform.DebuggerPlatformServicePlugin;
 import ghidra.app.services.DebuggerEmulationService.EmulationResult;
-import ghidra.app.services.DebuggerTraceManagerService.ActivationCause;
 import ghidra.app.services.DebuggerStaticMappingService;
+import ghidra.app.services.DebuggerTraceManagerService.ActivationCause;
+import ghidra.debug.api.platform.DebuggerPlatformMapper;
+import ghidra.debug.api.tracemgr.DebuggerCoordinates;
+import ghidra.pcode.emu.PcodeThread;
+import ghidra.pcode.exec.DecodePcodeExecutionException;
 import ghidra.pcode.exec.InterruptPcodeExecutionException;
 import ghidra.pcode.utils.Utils;
 import ghidra.program.model.address.Address;
@@ -55,13 +59,13 @@ import ghidra.trace.model.guest.TracePlatform;
 import ghidra.trace.model.memory.TraceMemoryManager;
 import ghidra.trace.model.memory.TraceMemorySpace;
 import ghidra.trace.model.thread.TraceThread;
+import ghidra.trace.model.time.TraceSnapshot;
 import ghidra.trace.model.time.schedule.Scheduler;
 import ghidra.trace.model.time.schedule.TraceSchedule;
-import ghidra.util.database.UndoableTransaction;
 import ghidra.util.task.TaskMonitor;
 
 @Category(NightlyCategory.class) // this may actually be an @PortSensitive test
-public class DebuggerEmulationServiceTest extends AbstractGhidraHeadedDebuggerGUITest {
+public class DebuggerEmulationServiceTest extends AbstractGhidraHeadedDebuggerTest {
 	protected DebuggerEmulationServicePlugin emulationPlugin;
 	protected CodeBrowserPlugin codeBrowser;
 
@@ -84,7 +88,7 @@ public class DebuggerEmulationServiceTest extends AbstractGhidraHeadedDebuggerGU
 		Register regPC = program.getRegister("pc");
 		Register regR0 = program.getRegister("r0");
 		Register regR1 = program.getRegister("r1");
-		try (UndoableTransaction tid = UndoableTransaction.start(program, "Initialize")) {
+		try (Transaction tx = program.openTransaction("Initialize")) {
 			MemoryBlock blockText = memory.createInitializedBlock(".text", addrText, 0x1000,
 				(byte) 0, TaskMonitor.DUMMY, false);
 			blockText.setExecute(true);
@@ -113,8 +117,8 @@ public class DebuggerEmulationServiceTest extends AbstractGhidraHeadedDebuggerGU
 		assertEquals(new BigInteger("0000", 16), regs.getViewValue(0, regR0).getUnsignedValue());
 		assertEquals(new BigInteger("1234", 16), regs.getViewValue(0, regR1).getUnsignedValue());
 
-		long scratch =
-			emulationPlugin.emulate(trace, TraceSchedule.parse("0:t0-1"), TaskMonitor.DUMMY);
+		long scratch = emulationPlugin.emulate(trace,
+			TraceSchedule.snap(0).steppedForward(thread, 1), TaskMonitor.DUMMY);
 
 		assertEquals(new BigInteger("00400002", 16),
 			regs.getViewValue(scratch, regPC).getUnsignedValue());
@@ -139,7 +143,7 @@ public class DebuggerEmulationServiceTest extends AbstractGhidraHeadedDebuggerGU
 		Register regPC = program.getRegister("pc");
 		Register regR0 = program.getRegister("r0");
 		Register regR1 = program.getRegister("r1");
-		try (UndoableTransaction tid = UndoableTransaction.start(program, "Initialize")) {
+		try (Transaction tx = program.openTransaction("Initialize")) {
 			MemoryBlock blockText = memory.createInitializedBlock(".text", addrText, 0x1000,
 				(byte) 0, TaskMonitor.DUMMY, false);
 			blockText.setExecute(true);
@@ -170,8 +174,8 @@ public class DebuggerEmulationServiceTest extends AbstractGhidraHeadedDebuggerGU
 		assertEquals(new BigInteger("00000400", 16),
 			regs.getViewValue(0, regR1).getUnsignedValue());
 
-		long scratch =
-			emulationPlugin.emulate(trace, TraceSchedule.parse("0:t0-1"), TaskMonitor.DUMMY);
+		long scratch = emulationPlugin.emulate(trace,
+			TraceSchedule.snap(0).steppedForward(thread, 1), TaskMonitor.DUMMY);
 
 		assertEquals(new BigInteger("00000402", 16),
 			regs.getViewValue(scratch, regPC).getUnsignedValue());
@@ -197,7 +201,7 @@ public class DebuggerEmulationServiceTest extends AbstractGhidraHeadedDebuggerGU
 		Register regPC = program.getRegister("PC");
 		Register regW0 = program.getRegister("W0");
 		Register regW1 = program.getRegister("W1");
-		try (UndoableTransaction tid = UndoableTransaction.start(program, "Initialize")) {
+		try (Transaction tx = program.openTransaction("Initialize")) {
 			MemoryBlock blockText = memory.createInitializedBlock(".text", addrText, 0x1000,
 				(byte) 0, TaskMonitor.DUMMY, false);
 			blockText.setExecute(true);
@@ -219,6 +223,7 @@ public class DebuggerEmulationServiceTest extends AbstractGhidraHeadedDebuggerGU
 
 		Trace trace = traceManager.getCurrentTrace();
 		assertNotNull(trace);
+		TraceThread thread = Unique.assertOne(trace.getThreadManager().getAllThreads());
 
 		TraceMemoryManager mem = trace.getMemoryManager();
 		assertEquals(new BigInteger("000100", 16),
@@ -228,8 +233,8 @@ public class DebuggerEmulationServiceTest extends AbstractGhidraHeadedDebuggerGU
 		assertEquals(new BigInteger("0800", 16),
 			mem.getViewValue(0, regW1).getUnsignedValue());
 
-		long scratch =
-			emulationPlugin.emulate(trace, TraceSchedule.parse("0:t0-1"), TaskMonitor.DUMMY);
+		long scratch = emulationPlugin.emulate(trace,
+			TraceSchedule.snap(0).steppedForward(thread, 1), TaskMonitor.DUMMY);
 
 		assertEquals(new BigInteger("000102", 16),
 			mem.getViewValue(scratch, regPC).getUnsignedValue());
@@ -251,7 +256,7 @@ public class DebuggerEmulationServiceTest extends AbstractGhidraHeadedDebuggerGU
 		Memory memory = program.getMemory();
 		Address addrText = addr(program, 0x00400000);
 		Address addrData = addr(program, 0x00600000);
-		try (UndoableTransaction tid = UndoableTransaction.start(program, "Initialize")) {
+		try (Transaction tx = program.openTransaction("Initialize")) {
 			MemoryBlock blockText = memory.createInitializedBlock("text", addrText, 0x1000,
 				(byte) 0, TaskMonitor.DUMMY, false);
 			blockText.setExecute(true);
@@ -271,7 +276,7 @@ public class DebuggerEmulationServiceTest extends AbstractGhidraHeadedDebuggerGU
 		CompletableFuture<Void> settled;
 		TraceThread thread;
 		TraceMemorySpace regs;
-		try (UndoableTransaction tid = tb.startTransaction()) {
+		try (Transaction tx = tb.startTransaction()) {
 			thread = tb.getOrAddThread("Threads[0]", 0);
 			regs = tb.trace.getMemoryManager().getMemoryRegisterSpace(thread, true);
 			regs.setValue(0, new RegisterValue(program.getLanguage().getProgramCounter(),
@@ -304,7 +309,7 @@ public class DebuggerEmulationServiceTest extends AbstractGhidraHeadedDebuggerGU
 		AssemblyBuffer buf = new AssemblyBuffer(asm, tb.addr(x64, 0x00400000));
 		TraceMemoryManager mem = tb.trace.getMemoryManager();
 		TraceThread thread;
-		try (UndoableTransaction tid = tb.startTransaction()) {
+		try (Transaction tx = tb.startTransaction()) {
 			thread = tb.getOrAddThread("Threads[0]", 0);
 			buf.assemble("MOV RAX, qword ptr [0x00600800]");
 			mem.putBytes(0, tb.addr(0x00400000), ByteBuffer.wrap(buf.getBytes()));
@@ -330,7 +335,7 @@ public class DebuggerEmulationServiceTest extends AbstractGhidraHeadedDebuggerGU
 		waitForPass(() -> assertEquals(x64, traceManager.getCurrentPlatform().getLanguage()));
 		TracePlatform platform = traceManager.getCurrentPlatform();
 
-		try (UndoableTransaction tid = tb.startTransaction()) {
+		try (Transaction tx = tb.startTransaction()) {
 			tb.exec(platform, 0, thread, 0, "RIP = 0x00400000;");
 		}
 
@@ -344,18 +349,59 @@ public class DebuggerEmulationServiceTest extends AbstractGhidraHeadedDebuggerGU
 	}
 
 	@Test
+	public void testInterruptOnDecodeUninitialized() throws Exception {
+		createProgram();
+		intoProject(program);
+		Assembler asm = Assemblers.getAssembler(program);
+		Memory memory = program.getMemory();
+		Address addrText = addr(program, 0x00400000);
+		Register regPC = program.getRegister("pc");
+
+		try (Transaction tx = program.openTransaction("Initialize")) {
+			MemoryBlock blockText = memory.createInitializedBlock(".text", addrText, 0x1000,
+				(byte) 0, TaskMonitor.DUMMY, false);
+			blockText.setExecute(true);
+			asm.assemble(addrText,
+				"br 0x003ffffe");
+		}
+
+		programManager.openProgram(program);
+		waitForSwing();
+		codeBrowser.goTo(new ProgramLocation(program, addrText));
+		waitForSwing();
+
+		performEnabledAction(codeBrowser.getProvider(), emulationPlugin.actionEmulateProgram, true);
+
+		Trace trace = traceManager.getCurrentTrace();
+		assertNotNull(trace);
+
+		TraceThread thread = Unique.assertOne(trace.getThreadManager().getAllThreads());
+		TraceMemorySpace regs = trace.getMemoryManager().getMemoryRegisterSpace(thread, false);
+
+		EmulationResult result = emulationPlugin.run(trace.getPlatformManager().getHostPlatform(),
+			TraceSchedule.snap(0), TaskMonitor.DUMMY, Scheduler.oneThread(thread));
+
+		assertEquals(TraceSchedule.snap(0).steppedForward(thread, 1), result.schedule());
+		assertTrue(result.error() instanceof DecodePcodeExecutionException);
+
+		long scratch = result.snapshot();
+		assertEquals(new BigInteger("003ffffe", 16),
+			regs.getViewValue(scratch, regPC).getUnsignedValue());
+	}
+
+	@Test
 	public void testExecutionBreakpoint() throws Exception {
 		createProgram();
 		intoProject(program);
 		Assembler asm = Assemblers.getAssembler(program);
 		Memory memory = program.getMemory();
-		Address addrText = addr(program, 0x000400000);
+		Address addrText = addr(program, 0x00400000);
 		Register regPC = program.getRegister("pc");
 		Register regR0 = program.getRegister("r0");
 		Register regR1 = program.getRegister("r1");
 		Register regR2 = program.getRegister("r2");
 		Address addrI2;
-		try (UndoableTransaction tid = UndoableTransaction.start(program, "Initialize")) {
+		try (Transaction tx = program.openTransaction("Initialize")) {
 			MemoryBlock blockText = memory.createInitializedBlock(".text", addrText, 0x1000,
 				(byte) 0, TaskMonitor.DUMMY, false);
 			blockText.setExecute(true);
@@ -381,7 +427,7 @@ public class DebuggerEmulationServiceTest extends AbstractGhidraHeadedDebuggerGU
 		TraceThread thread = Unique.assertOne(trace.getThreadManager().getAllThreads());
 		TraceMemorySpace regs = trace.getMemoryManager().getMemoryRegisterSpace(thread, false);
 
-		try (UndoableTransaction tid = UndoableTransaction.start(trace, "Add breakpoint")) {
+		try (Transaction tx = trace.openTransaction("Add breakpoint")) {
 			trace.getBreakpointManager()
 					.addBreakpoint("Breakpoints[0]", Lifespan.nowOn(0), addrI2, Set.of(thread),
 						Set.of(TraceBreakpointKind.SW_EXECUTE), true, "test");
@@ -390,7 +436,7 @@ public class DebuggerEmulationServiceTest extends AbstractGhidraHeadedDebuggerGU
 		EmulationResult result = emulationPlugin.run(trace.getPlatformManager().getHostPlatform(),
 			TraceSchedule.snap(0), TaskMonitor.DUMMY, Scheduler.oneThread(thread));
 
-		assertEquals(TraceSchedule.parse("0:t0-1"), result.schedule());
+		assertEquals(TraceSchedule.snap(0).steppedForward(thread, 1), result.schedule());
 		assertTrue(result.error() instanceof InterruptPcodeExecutionException);
 
 		long scratch = result.snapshot();
@@ -411,10 +457,10 @@ public class DebuggerEmulationServiceTest extends AbstractGhidraHeadedDebuggerGU
 		intoProject(program);
 		Assembler asm = Assemblers.getAssembler(program);
 		Memory memory = program.getMemory();
-		Address addrText = addr(program, 0x000400000);
+		Address addrText = addr(program, 0x00400000);
 		Address addrI1;
 		Address addrI2;
-		try (UndoableTransaction tid = UndoableTransaction.start(program, "Initialize")) {
+		try (Transaction tx = program.openTransaction("Initialize")) {
 			MemoryBlock blockText = memory.createInitializedBlock(".text", addrText, 0x1000,
 				(byte) 0, TaskMonitor.DUMMY, false);
 			blockText.setExecute(true);
@@ -439,7 +485,7 @@ public class DebuggerEmulationServiceTest extends AbstractGhidraHeadedDebuggerGU
 
 		TraceThread thread = Unique.assertOne(trace.getThreadManager().getAllThreads());
 
-		try (UndoableTransaction tid = UndoableTransaction.start(trace, "Add breakpoint")) {
+		try (Transaction tx = trace.openTransaction("Add breakpoint")) {
 			trace.getBreakpointManager()
 					.addBreakpoint("Breakpoints[0]", Lifespan.nowOn(0), addrText, Set.of(thread),
 						Set.of(TraceBreakpointKind.SW_EXECUTE), true, "test");
@@ -454,13 +500,13 @@ public class DebuggerEmulationServiceTest extends AbstractGhidraHeadedDebuggerGU
 		// This is already testing if the one set at the entry is ignored
 		EmulationResult result1 = emulationPlugin.run(trace.getPlatformManager().getHostPlatform(),
 			TraceSchedule.snap(0), monitor, Scheduler.oneThread(thread));
-		assertEquals(TraceSchedule.parse("0:t0-1"), result1.schedule());
+		assertEquals(TraceSchedule.snap(0).steppedForward(thread, 1), result1.schedule());
 		assertTrue(result1.error() instanceof InterruptPcodeExecutionException);
 
 		// This will test if the one just hit gets ignored
 		EmulationResult result2 = emulationPlugin.run(trace.getPlatformManager().getHostPlatform(),
 			result1.schedule(), monitor, Scheduler.oneThread(thread));
-		assertEquals(TraceSchedule.parse("0:t0-2"), result2.schedule());
+		assertEquals(TraceSchedule.snap(0).steppedForward(thread, 2), result2.schedule());
 		assertTrue(result1.error() instanceof InterruptPcodeExecutionException);
 	}
 
@@ -470,13 +516,13 @@ public class DebuggerEmulationServiceTest extends AbstractGhidraHeadedDebuggerGU
 		intoProject(program);
 		Assembler asm = Assemblers.getAssembler(program);
 		Memory memory = program.getMemory();
-		Address addrText = addr(program, 0x000400000);
+		Address addrText = addr(program, 0x00400000);
 		Register regPC = program.getRegister("pc");
 		Register regR0 = program.getRegister("r0");
 		Register regR1 = program.getRegister("r1");
 		Register regR2 = program.getRegister("r2");
 		Address addrI2;
-		try (UndoableTransaction tid = UndoableTransaction.start(program, "Initialize")) {
+		try (Transaction tx = program.openTransaction("Initialize")) {
 			MemoryBlock blockText = memory.createInitializedBlock(".text", addrText, 0x1000,
 				(byte) 0, TaskMonitor.DUMMY, false);
 			blockText.setExecute(true);
@@ -502,7 +548,7 @@ public class DebuggerEmulationServiceTest extends AbstractGhidraHeadedDebuggerGU
 		TraceThread thread = Unique.assertOne(trace.getThreadManager().getAllThreads());
 		TraceMemorySpace regs = trace.getMemoryManager().getMemoryRegisterSpace(thread, false);
 
-		try (UndoableTransaction tid = UndoableTransaction.start(trace, "Add breakpoint")) {
+		try (Transaction tx = trace.openTransaction("Add breakpoint")) {
 			TraceBreakpoint tb = trace.getBreakpointManager()
 					.addBreakpoint("Breakpoints[0]", Lifespan.nowOn(0), addrI2, Set.of(thread),
 						Set.of(TraceBreakpointKind.SW_EXECUTE), true, "test");
@@ -516,7 +562,8 @@ public class DebuggerEmulationServiceTest extends AbstractGhidraHeadedDebuggerGU
 		EmulationResult result = emulationPlugin.run(trace.getPlatformManager().getHostPlatform(),
 			TraceSchedule.snap(0), TaskMonitor.DUMMY, Scheduler.oneThread(thread));
 
-		assertEquals(TraceSchedule.parse("0:t0-1.t0-2"), result.schedule());
+		assertEquals(TraceSchedule.snap(0).steppedForward(thread, 1).steppedPcodeForward(thread, 2),
+			result.schedule());
 		assertTrue(result.error() instanceof InterruptPcodeExecutionException);
 
 		long scratch = result.snapshot();
@@ -537,12 +584,12 @@ public class DebuggerEmulationServiceTest extends AbstractGhidraHeadedDebuggerGU
 		intoProject(program);
 		Assembler asm = Assemblers.getAssembler(program);
 		Memory memory = program.getMemory();
-		Address addrText = addr(program, 0x000400000);
+		Address addrText = addr(program, 0x00400000);
 		Register regPC = program.getRegister("pc");
 		Register regR0 = program.getRegister("r0");
 		Register regR1 = program.getRegister("r1");
 		Register regR2 = program.getRegister("r2");
-		try (UndoableTransaction tid = UndoableTransaction.start(program, "Initialize")) {
+		try (Transaction tx = program.openTransaction("Initialize")) {
 			MemoryBlock blockText = memory.createInitializedBlock(".text", addrText, 0x1000,
 				(byte) 0, TaskMonitor.DUMMY, false);
 			blockText.setExecute(true);
@@ -568,7 +615,7 @@ public class DebuggerEmulationServiceTest extends AbstractGhidraHeadedDebuggerGU
 		TraceMemoryManager mem = trace.getMemoryManager();
 		TraceMemorySpace regs = mem.getMemoryRegisterSpace(thread, false);
 
-		try (UndoableTransaction tid = UndoableTransaction.start(trace, "Add breakpoint")) {
+		try (Transaction tx = trace.openTransaction("Add breakpoint")) {
 			trace.getBreakpointManager()
 					.addBreakpoint("Breakpoints[0]", Lifespan.nowOn(0), addr(trace, 0x1234),
 						Set.of(thread), Set.of(TraceBreakpointKind.READ), true, "test");
@@ -577,7 +624,7 @@ public class DebuggerEmulationServiceTest extends AbstractGhidraHeadedDebuggerGU
 		EmulationResult result = emulationPlugin.run(trace.getPlatformManager().getHostPlatform(),
 			TraceSchedule.snap(0), TaskMonitor.DUMMY, Scheduler.oneThread(thread));
 
-		assertEquals(TraceSchedule.parse("0:t0-1"), result.schedule());
+		assertEquals(TraceSchedule.snap(0).steppedForward(thread, 1), result.schedule());
 		assertTrue(result.error() instanceof InterruptPcodeExecutionException);
 
 		long scratch = result.snapshot();
@@ -605,7 +652,7 @@ public class DebuggerEmulationServiceTest extends AbstractGhidraHeadedDebuggerGU
 		Register regR0 = program.getRegister("r0");
 		Register regR2 = program.getRegister("r2");
 		Address addrI2;
-		try (UndoableTransaction tid = UndoableTransaction.start(program, "Initialize")) {
+		try (Transaction tx = program.openTransaction("Initialize")) {
 			MemoryBlock blockText = memory.createInitializedBlock(".text", addrText, 0x1000,
 				(byte) 0, TaskMonitor.DUMMY, false);
 			blockText.setExecute(true);
@@ -633,11 +680,11 @@ public class DebuggerEmulationServiceTest extends AbstractGhidraHeadedDebuggerGU
 		TraceMemorySpace regs = trace.getMemoryManager().getMemoryRegisterSpace(thread, false);
 
 		// Step as written to fill the cache
-		waitOn(traceManager.activateAndNotify(current.time(TraceSchedule.parse("0:t0-1")),
-			ActivationCause.USER, false));
+		waitOn(traceManager.activateAndNotify(
+			current.time(TraceSchedule.snap(0).steppedForward(thread, 1)), ActivationCause.USER));
 		waitForSwing();
-		waitOn(traceManager.activateAndNotify(current.time(TraceSchedule.parse("0:t0-2")),
-			ActivationCause.USER, false));
+		waitOn(traceManager.activateAndNotify(
+			current.time(TraceSchedule.snap(0).steppedForward(thread, 2)), ActivationCause.USER));
 		waitForSwing();
 		long scratch = traceManager.getCurrentView().getSnap();
 
@@ -646,7 +693,7 @@ public class DebuggerEmulationServiceTest extends AbstractGhidraHeadedDebuggerGU
 			regs.getViewValue(scratch, regR2).getUnsignedValue());
 
 		// Inject some logic that would require a cache refresh to materialize
-		try (UndoableTransaction tid = UndoableTransaction.start(trace, "Add breakpoint")) {
+		try (Transaction tx = trace.openTransaction("Add breakpoint")) {
 			TraceBreakpoint tb = trace.getBreakpointManager()
 					.addBreakpoint("Breakpoints[0]", Lifespan.nowOn(0), addrI2, Set.of(thread),
 						Set.of(TraceBreakpointKind.SW_EXECUTE), true, "test");
@@ -657,11 +704,11 @@ public class DebuggerEmulationServiceTest extends AbstractGhidraHeadedDebuggerGU
 		}
 
 		// Check the cache is still valid
-		waitOn(traceManager.activateAndNotify(current.time(TraceSchedule.parse("0:t0-1")),
-			ActivationCause.USER, false));
+		waitOn(traceManager.activateAndNotify(
+			current.time(TraceSchedule.snap(0).steppedForward(thread, 1)), ActivationCause.USER));
 		waitForSwing();
-		waitOn(traceManager.activateAndNotify(current.time(TraceSchedule.parse("0:t0-2")),
-			ActivationCause.USER, false));
+		waitOn(traceManager.activateAndNotify(
+			current.time(TraceSchedule.snap(0).steppedForward(thread, 2)), ActivationCause.USER));
 		waitForSwing();
 		assertEquals(scratch, traceManager.getCurrentView().getSnap());
 		assertEquals(new BigInteger("1234", 16),
@@ -673,5 +720,68 @@ public class DebuggerEmulationServiceTest extends AbstractGhidraHeadedDebuggerGU
 		waitForTasks();
 		assertEquals(new BigInteger("5678", 16),
 			regs.getViewValue(scratch, regR2).getUnsignedValue());
+	}
+
+	@Test
+	public void testCustomStack() throws Exception {
+		createProgram();
+		intoProject(program);
+		Memory memory = program.getMemory();
+		Address addrText = addr(program, 0x00400000);
+		Register regSP = program.getRegister("sp");
+		try (Transaction tx = program.openTransaction("Initialize")) {
+			MemoryBlock blockText = memory.createInitializedBlock(".text", addrText, 0x1000,
+				(byte) 0, TaskMonitor.DUMMY, false);
+			blockText.setExecute(true);
+			memory.createUninitializedBlock("STACK", addr(program, 0x00001234), 0x1000, false);
+		}
+
+		programManager.openProgram(program);
+		waitForSwing();
+		codeBrowser.goTo(new ProgramLocation(program, addrText));
+		waitForSwing();
+
+		assertTrue(emulationPlugin.actionEmulateProgram.isEnabled());
+		performAction(emulationPlugin.actionEmulateProgram);
+
+		Trace trace = traceManager.getCurrentTrace();
+		assertNotNull(trace);
+
+		TraceThread thread = Unique.assertOne(trace.getThreadManager().getAllThreads());
+		TraceMemorySpace regs = trace.getMemoryManager().getMemoryRegisterSpace(thread, false);
+		assertEquals(new BigInteger("2234", 16), regs.getViewValue(0, regSP).getUnsignedValue());
+	}
+
+	@Test
+	public void testNewThreadAfterLoadTrace() throws Exception {
+		createAndOpenTrace();
+		createProgramFromTrace();
+		intoProject(program);
+
+		long restartEmuSnap = 3;
+		try (Transaction tx = tb.startTransaction()) {
+			tb.trace.getObjectManager().createRootObject(ProgramEmulationUtils.EMU_SESSION_SCHEMA);
+			tb.trace.getTimeManager().getSnapshot(restartEmuSnap, true);
+		}
+		traceManager.activateTrace(tb.trace);
+		traceManager.activateSnap(restartEmuSnap);
+
+		try (Transaction tx = tb.startTransaction()) {
+			TracePlatform host = tb.trace.getPlatformManager().getHostPlatform();
+			DefaultPcodeDebuggerAccess access =
+				new DefaultPcodeDebuggerAccess(tool, null, host, restartEmuSnap);
+			BytesDebuggerPcodeEmulator emulator = new BytesDebuggerPcodeEmulator(access);
+
+			TraceSnapshot snapshot =
+				tb.trace.getTimeManager().createSnapshot("created new emulator thread");
+			long newSnap = snapshot.getKey();
+			emulator.writeDown(host, newSnap, newSnap);
+
+			TraceThread newTraceThread = ProgramEmulationUtils.doLaunchEmulationThread(tb.trace,
+				newSnap, program, tb.addr(0x00400000), addr(program, 0x00400000));
+			newTraceThread.setName("MyThread");
+
+			PcodeThread<byte[]> newEmuThread = emulator.newThread(newTraceThread.getPath());
+		}
 	}
 }

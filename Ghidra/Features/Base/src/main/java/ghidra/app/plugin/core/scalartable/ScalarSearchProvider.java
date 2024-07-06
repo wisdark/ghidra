@@ -28,7 +28,6 @@ import docking.widgets.table.GTableFilterPanel;
 import docking.widgets.table.TableFilter;
 import generic.theme.GIcon;
 import ghidra.app.plugin.core.scalartable.RangeFilterTextField.FilterType;
-import ghidra.app.services.GoToService;
 import ghidra.framework.plugintool.ComponentProviderAdapter;
 import ghidra.program.model.address.Address;
 import ghidra.program.model.listing.Program;
@@ -118,8 +117,7 @@ public class ScalarSearchProvider extends ComponentProviderAdapter {
 			buffy.append(" [filter: ")
 					.append(minValueText)
 					.append(" - ")
-					.append(
-						maxValueText)
+					.append(maxValueText)
 					.append(']');
 		}
 
@@ -182,10 +180,6 @@ public class ScalarSearchProvider extends ComponentProviderAdapter {
 		filter.dispose();
 	}
 
-	ProgramSelection getSelection() {
-		return scalarTable.getProgramSelection();
-	}
-
 	void reload() {
 		if (isVisible()) {
 			scalarModel.reload();
@@ -218,8 +212,7 @@ public class ScalarSearchProvider extends ComponentProviderAdapter {
 		scalarModel.addTableModelListener(
 			e -> setSubTitle(primarySubTitle + ' ' + scalarModel.getRowCount() + " items"));
 
-		GoToService goToService = tool.getService(GoToService.class);
-		scalarTable.installNavigation(goToService, goToService.getDefaultNavigatable());
+		scalarTable.installNavigation(tool);
 
 		mainPanel = new JPanel(new BorderLayout());
 		mainPanel.add(threadedTablePanel, BorderLayout.CENTER);

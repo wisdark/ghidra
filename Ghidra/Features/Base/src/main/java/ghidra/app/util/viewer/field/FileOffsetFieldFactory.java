@@ -15,13 +15,12 @@
  */
 package ghidra.app.util.viewer.field;
 
-import java.beans.PropertyEditor;
 import java.math.BigInteger;
 
 import docking.widgets.fieldpanel.field.*;
 import docking.widgets.fieldpanel.support.FieldLocation;
 import generic.theme.GColor;
-import ghidra.app.util.HighlightProvider;
+import ghidra.app.util.ListingHighlightProvider;
 import ghidra.app.util.viewer.format.FieldFormatModel;
 import ghidra.app.util.viewer.proxy.ProxyObj;
 import ghidra.framework.options.*;
@@ -49,8 +48,6 @@ public class FileOffsetFieldFactory extends FieldFactory {
 
 	private boolean showFilename;
 	private boolean useHex;
-	private PropertyEditor fileOffsetFieldOptionsEditor =
-		new FileOffsetFieldOptionsPropertyEditor();
 
 	/**
 	 * Default Constructor
@@ -66,7 +63,7 @@ public class FileOffsetFieldFactory extends FieldFactory {
 	 * @param displayOptions the Options for display properties.
 	 * @param fieldOptions the Options for field specific properties.
 	 */
-	private FileOffsetFieldFactory(FieldFormatModel model, HighlightProvider hlProvider,
+	private FileOffsetFieldFactory(FieldFormatModel model, ListingHighlightProvider hlProvider,
 			Options displayOptions, Options fieldOptions) {
 		super(FIELD_NAME, model, hlProvider, displayOptions, fieldOptions);
 		initOptions(fieldOptions);
@@ -77,7 +74,8 @@ public class FileOffsetFieldFactory extends FieldFactory {
 
 		fieldOptions.registerOption(FILE_OFFSET_DISPLAY_OPTIONS_NAME, OptionType.CUSTOM_TYPE,
 			new FileOffsetFieldOptionsWrappedOption(), helpLoc,
-			"Adjusts the File Offset Field display", fileOffsetFieldOptionsEditor);
+			"Adjusts the File Offset Field display",
+			() -> new FileOffsetFieldOptionsPropertyEditor());
 
 		CustomOption customOption =
 			fieldOptions.getCustomOption(FILE_OFFSET_DISPLAY_OPTIONS_NAME, null);
@@ -97,7 +95,8 @@ public class FileOffsetFieldFactory extends FieldFactory {
 
 	@Override
 	public FieldFactory newInstance(FieldFormatModel formatModel,
-			HighlightProvider highlightProvider, ToolOptions options, ToolOptions fieldOptions) {
+			ListingHighlightProvider highlightProvider, ToolOptions options,
+			ToolOptions fieldOptions) {
 		return new FileOffsetFieldFactory(formatModel, highlightProvider, options, fieldOptions);
 	}
 

@@ -22,12 +22,17 @@
 #endif
 #ifdef CPUI_STATISTICS
 #include <cmath>
+#endif
+
+namespace ghidra {
+
+#ifdef CPUI_STATISTICS
 using std::sqrt;
 #endif
 
 vector<ArchitectureCapability *> ArchitectureCapability::thelist;
 
-const uint4 ArchitectureCapability::majorversion = 5;
+const uint4 ArchitectureCapability::majorversion = 6;
 const uint4 ArchitectureCapability::minorversion = 0;
 
 AttributeId ATTRIB_ADDRESS = AttributeId("address",148);
@@ -1316,7 +1321,6 @@ void Architecture::parseCompilerConfig(DocumentStorage &store)
   if (miter == protoModels.end()) { // If __thiscall doesn't exist we clone it off of the default
     createModelAlias("__thiscall",defaultfp->getName());
   }
-  userops.setDefaults(this);
   initializeSegments();
   PreferSplitManager::initialize(splitrecords);
   types->setupSizes();		// If no data_organization was registered, set up default values
@@ -1375,6 +1379,7 @@ void Architecture::init(DocumentStorage &store)
   buildDatabase(store);
 
   restoreFromSpec(store);
+  buildCoreTypes(store);
   print->initializeFromArchitecture();
   symboltab->adjustCaches();	// In case the specs created additional address spaces
   buildSymbols(store);
@@ -1396,7 +1401,12 @@ void Architecture::resetDefaultsInternal(void)
   infer_pointers = true;
   analyze_for_loops = true;
   readonlypropagate = false;
-  alias_block_level = 2;	// Block structs and arrays by default
+  nan_ignore_all = false;
+  nan_ignore_compare = true;	// Ignore only NaN operations associated with floating-point comparisons by default
+  alias_block_level = 2;	// Block structs and arrays by default, but not more primitive data-types
+  split_datatype_config = OptionSplitDatatypes::option_struct | OptionSplitDatatypes::option_array
+      | OptionSplitDatatypes::option_pointer;
+  max_jumptable_size = 1024;
 }
 
 /// Reset options that can be modified by the OptionDatabase. This includes
@@ -1532,3 +1542,5 @@ void Statistics::printResults(ostream &s)
 }
 
 #endif
+
+} // End namespace ghidra
