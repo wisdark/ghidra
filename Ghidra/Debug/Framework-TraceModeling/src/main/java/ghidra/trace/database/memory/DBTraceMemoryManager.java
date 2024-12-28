@@ -4,9 +4,9 @@
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
  * You may obtain a copy of the License at
- * 
+ *
  *      http://www.apache.org/licenses/LICENSE-2.0
- * 
+ *
  * Unless required by applicable law or agreed to in writing, software
  * distributed under the License is distributed on an "AS IS" BASIS,
  * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
@@ -25,7 +25,6 @@ import java.util.concurrent.locks.ReadWriteLock;
 import java.util.function.Predicate;
 
 import db.DBHandle;
-import ghidra.dbg.target.TargetMemoryRegion;
 import ghidra.framework.data.OpenMode;
 import ghidra.program.model.address.*;
 import ghidra.program.model.lang.Language;
@@ -174,7 +173,7 @@ public class DBTraceMemoryManager extends AbstractDBTraceSpaceBasedManager<DBTra
 	public TraceMemoryRegion getRegionContaining(long snap, Address address) {
 		if (trace.getObjectManager().hasSchema()) {
 			return trace.getObjectManager()
-					.getObjectContaining(snap, address, TargetMemoryRegion.RANGE_ATTRIBUTE_NAME,
+					.getObjectContaining(snap, address, TraceObjectMemoryRegion.KEY_RANGE,
 						TraceObjectMemoryRegion.class);
 		}
 		return delegateRead(address.getAddressSpace(), m -> m.getRegionContaining(snap, address));
@@ -186,7 +185,7 @@ public class DBTraceMemoryManager extends AbstractDBTraceSpaceBasedManager<DBTra
 		if (trace.getObjectManager().hasSchema()) {
 			return trace.getObjectManager()
 					.getObjectsIntersecting(lifespan, range,
-						TargetMemoryRegion.RANGE_ATTRIBUTE_NAME, TraceObjectMemoryRegion.class);
+						TraceObjectMemoryRegion.KEY_RANGE, TraceObjectMemoryRegion.class);
 		}
 		return delegateRead(range.getAddressSpace(), m -> m.getRegionsIntersecting(lifespan, range),
 			Collections.emptyList());
@@ -219,7 +218,7 @@ public class DBTraceMemoryManager extends AbstractDBTraceSpaceBasedManager<DBTra
 	public AddressSetView getRegionsAddressSet(long snap) {
 		if (trace.getObjectManager().hasSchema()) {
 			return trace.getObjectManager()
-					.getObjectsAddressSet(snap, TargetMemoryRegion.RANGE_ATTRIBUTE_NAME,
+					.getObjectsAddressSet(snap, TraceObjectMemoryRegion.KEY_RANGE,
 						TraceObjectMemoryRegion.class, r -> true);
 		}
 		return new UnionAddressSetView(
@@ -231,7 +230,7 @@ public class DBTraceMemoryManager extends AbstractDBTraceSpaceBasedManager<DBTra
 			Predicate<TraceMemoryRegion> predicate) {
 		if (trace.getObjectManager().hasSchema()) {
 			return trace.getObjectManager()
-					.getObjectsAddressSet(snap, TargetMemoryRegion.RANGE_ATTRIBUTE_NAME,
+					.getObjectsAddressSet(snap, TraceObjectMemoryRegion.KEY_RANGE,
 						TraceObjectMemoryRegion.class, predicate);
 		}
 		return new UnionAddressSetView(getActiveMemorySpaces().stream()
@@ -277,6 +276,13 @@ public class DBTraceMemoryManager extends AbstractDBTraceSpaceBasedManager<DBTra
 			Address address) {
 		return delegateRead(address.getAddressSpace(),
 			m -> m.getMostRecentStateEntry(snap, address));
+	}
+
+	@Override
+	public Entry<TraceAddressSnapRange, TraceMemoryState> getViewMostRecentStateEntry(long snap,
+			AddressRange range, Predicate<TraceMemoryState> predicate) {
+		return delegateRead(range.getAddressSpace(),
+			m -> m.getViewMostRecentStateEntry(snap, range, predicate));
 	}
 
 	@Override

@@ -4,9 +4,9 @@
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
  * You may obtain a copy of the License at
- * 
+ *
  *      http://www.apache.org/licenses/LICENSE-2.0
- * 
+ *
  * Unless required by applicable law or agreed to in writing, software
  * distributed under the License is distributed on an "AS IS" BASIS,
  * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
@@ -33,13 +33,11 @@ import org.apache.commons.io.output.TeeOutputStream;
 import org.apache.commons.lang3.exception.ExceptionUtils;
 import org.hamcrest.Matchers;
 import org.junit.Before;
-import org.junit.BeforeClass;
 
 import ghidra.app.plugin.core.debug.gui.AbstractGhidraHeadedDebuggerTest;
 import ghidra.app.plugin.core.debug.service.tracermi.TraceRmiPlugin;
 import ghidra.app.plugin.core.debug.utils.ManagedDomainObject;
 import ghidra.app.services.TraceRmiService;
-import ghidra.dbg.testutil.DummyProc;
 import ghidra.debug.api.tracermi.*;
 import ghidra.framework.*;
 import ghidra.framework.main.ApplicationLevelOnlyPlugin;
@@ -50,13 +48,13 @@ import ghidra.framework.plugintool.util.*;
 import ghidra.program.model.address.Address;
 import ghidra.program.model.address.AddressRangeImpl;
 import ghidra.pty.*;
+import ghidra.pty.testutil.DummyProc;
 import ghidra.trace.model.Lifespan;
 import ghidra.trace.model.breakpoint.TraceBreakpointKind;
 import ghidra.trace.model.breakpoint.TraceBreakpointKind.TraceBreakpointKindSet;
 import ghidra.trace.model.target.TraceObject;
 import ghidra.trace.model.target.TraceObjectValue;
-import ghidra.util.Msg;
-import ghidra.util.NumericUtilities;
+import ghidra.util.*;
 
 public abstract class AbstractLldbTraceRmiTest extends AbstractGhidraHeadedDebuggerTest {
 
@@ -192,8 +190,14 @@ public abstract class AbstractLldbTraceRmiTest extends AbstractGhidraHeadedDebug
 		setPythonPath(env);
 		env.put("TERM", "xterm-256color");
 		ByteArrayOutputStream capture = new ByteArrayOutputStream();
-		OutputStream tee = new TeeOutputStream(System.out, capture);
-		Thread pumper = new StreamPumper(pty.getParent().getInputStream(), tee);
+		OutputStream out;
+		if (SystemUtilities.isInTestingBatchMode()) {
+			out = capture;
+		}
+		else {
+			out = new TeeOutputStream(System.out, capture);
+		}
+		Thread pumper = new StreamPumper(pty.getParent().getInputStream(), out);
 		pumper.start();
 		PtySession lldbSession = pty.getChild().session(new String[] { lldbPath.toString() }, env);
 

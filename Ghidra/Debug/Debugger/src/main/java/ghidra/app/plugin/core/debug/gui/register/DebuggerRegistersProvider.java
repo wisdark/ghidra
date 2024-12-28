@@ -4,9 +4,9 @@
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
  * You may obtain a copy of the License at
- * 
+ *
  *      http://www.apache.org/licenses/LICENSE-2.0
- * 
+ *
  * Unless required by applicable law or agreed to in writing, software
  * distributed under the License is distributed on an "AS IS" BASIS,
  * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
@@ -43,12 +43,12 @@ import ghidra.app.plugin.core.data.DataSettingsDialog;
 import ghidra.app.plugin.core.debug.DebuggerPluginPackage;
 import ghidra.app.plugin.core.debug.gui.DebuggerProvider;
 import ghidra.app.plugin.core.debug.gui.DebuggerResources;
+import ghidra.app.plugin.core.debug.gui.DebuggerResources.GoToAction;
 import ghidra.app.services.*;
 import ghidra.app.services.DebuggerControlService.StateEditor;
 import ghidra.async.AsyncLazyValue;
 import ghidra.async.AsyncUtils;
 import ghidra.base.widgets.table.DataTypeTableCellEditor;
-import ghidra.dbg.error.DebuggerModelAccessException;
 import ghidra.debug.api.target.Target;
 import ghidra.debug.api.tracemgr.DebuggerCoordinates;
 import ghidra.docking.settings.*;
@@ -337,7 +337,18 @@ public class DebuggerRegistersProvider extends ComponentProviderAdapter
 		}
 
 		private void objectRestored(DomainObjectChangeRecord rec) {
-			coordinatesActivated(current.reFindThread());
+			/**
+			 * It's possible an "undo" or other transaction rollback will cause the current thread
+			 * to be replaced by another object. If that's the case, we need to adjust our
+			 * coordinates.
+			 * 
+			 * If that adjustment does not otherwise cause the table to update, we have to fire that
+			 * event, since the register values may have changed, esp., if this "restored" event is
+			 * the result of many events being coalesced.
+			 */
+			if (!coordinatesActivated(current.reFindThread())) {
+				regsTableModel.fireTableDataChanged();
+			}
 		}
 
 		private void registerValueChanged(TraceAddressSpace space, TraceAddressSnapRange range,
@@ -621,7 +632,10 @@ public class DebuggerRegistersProvider extends ComponentProviderAdapter
 		List<DockingActionIf> result = new ArrayList<>();
 		String pluginName = plugin.getName();
 		for (AddressSpace space : currentTrace.getBaseAddressFactory().getAddressSpaces()) {
-			if (space.isRegisterSpace()) {
+			if (!space.isMemorySpace()) {
+				continue;
+			}
+			if (space.getType() == AddressSpace.TYPE_OTHER) {
 				continue;
 			}
 			Address address;
@@ -631,18 +645,29 @@ public class DebuggerRegistersProvider extends ComponentProviderAdapter
 			catch (AddressOutOfBoundsException e) {
 				continue;
 			}
+
+			String name = GoToAction.NAME + " " + address.toString(true);
+
 			// Use program view, not memory manager, so that "Force Full View" is respected.
-			if (!currentTrace.getProgramView().getMemory().contains(address)) {
-				continue;
-			}
-			String name = "Goto " + address.toString(true);
-			result.add(new ActionBuilder(name, pluginName).popupMenuPath(name).onAction(ctx -> {
-				if (listingService == null) {
-					return;
-				}
-				ProgramLocation loc = new ProgramLocation(current.getView(), address);
-				listingService.goTo(loc, true);
-			}).build());
+			boolean enabled = currentTrace.getProgramView().getMemory().contains(address);
+			String extraDesc = enabled ? "" : ". Enable via Force Full View.";
+			result.add(new ActionBuilder(name, pluginName)
+					.popupMenuPath(name)
+					.popupMenuGroup("Go To")
+					.description(
+						"Navigate the dynamic listing to " + address.toString(true) + extraDesc)
+					.helpLocation(
+						new HelpLocation(pluginName, DebuggerResources.GoToAction.HELP_ANCHOR))
+					.enabledWhen(ctx -> enabled)
+					.popupWhen(ctx -> true)
+					.onAction(ctx -> {
+						if (listingService == null) {
+							return;
+						}
+						ProgramLocation loc = new ProgramLocation(current.getView(), address);
+						listingService.goTo(loc, true);
+					})
+					.build());
 		}
 		return result;
 	}
@@ -789,10 +814,16 @@ public class DebuggerRegistersProvider extends ComponentProviderAdapter
 		addNewTraceListener();
 	}
 
-	public void coordinatesActivated(DebuggerCoordinates coordinates) {
+	/**
+	 * Notify this provider of new coordinates
+	 * 
+	 * @param coordinates the new coordinates
+	 * @return true if the new coordinates caused the table to update
+	 */
+	public boolean coordinatesActivated(DebuggerCoordinates coordinates) {
 		if (sameCoordinates(current, coordinates)) {
 			current = coordinates;
-			return;
+			return false;
 		}
 
 		previous = current;
@@ -806,6 +837,7 @@ public class DebuggerRegistersProvider extends ComponentProviderAdapter
 		recomputeViewKnown();
 		loadRegistersAndValues();
 		contextChanged();
+		return true;
 	}
 
 	protected void traceClosed(Trace trace) {
@@ -1021,8 +1053,9 @@ public class DebuggerRegistersProvider extends ComponentProviderAdapter
 		if (regs == null && register.getAddressSpace().isRegisterSpace()) {
 			return false;
 		}
-		AddressRange range =
-			current.getPlatform().getConventionalRegisterRange(regs.getAddressSpace(), register);
+		AddressRange range = current.getPlatform()
+				.getConventionalRegisterRange(regs == null ? null : regs.getAddressSpace(),
+					register);
 		return viewKnown.contains(range.getMinAddress(), range.getMaxAddress());
 	}
 
@@ -1145,8 +1178,7 @@ public class DebuggerRegistersProvider extends ComponentProviderAdapter
 		if (mem == null) {
 			return result;
 		}
-		AddressSpace regSpace =
-			thread.getTrace().getBaseLanguage().getAddressFactory().getRegisterSpace();
+		AddressSpace regSpace = thread.getTrace().getBaseAddressFactory().getRegisterSpace();
 		AddressSet everKnown = new AddressSet();
 		for (Entry<TraceAddressSnapRange, TraceMemoryState> entry : mem.getMostRecentStates(
 			thread.getTrace().getTimeManager().getMaxSnap(),
@@ -1303,7 +1335,7 @@ public class DebuggerRegistersProvider extends ComponentProviderAdapter
 
 	private void reportError(String title, String message, Throwable ex) {
 		plugin.getTool().setStatusInfo(message + ": " + ex.getMessage());
-		if (title != null && !(ex instanceof DebuggerModelAccessException)) {
+		if (title != null) {
 			Msg.showError(this, getComponent(), title, message, ex);
 		}
 		else if (consoleService != null) {

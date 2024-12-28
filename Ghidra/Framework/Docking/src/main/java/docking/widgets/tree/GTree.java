@@ -4,9 +4,9 @@
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
  * You may obtain a copy of the License at
- * 
+ *
  *      http://www.apache.org/licenses/LICENSE-2.0
- * 
+ *
  * Unless required by applicable law or agreed to in writing, software
  * distributed under the License is distributed on an "AS IS" BASIS,
  * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
@@ -250,9 +250,9 @@ public class GTree extends JPanel implements BusyListener {
 	/**
 	 * Sets an accessible name on the GTree. This prefix will be used to assign
 	 * meaningful accessible names to the tree, filter text field and the filter options button such
-	 * that screen readers will properly describe them. 
+	 * that screen readers will properly describe them.
 	 * <P>
-	 * This prefix should be the base name that describes the type of items in the tree. 
+	 * This prefix should be the base name that describes the type of items in the tree.
 	 * This method will then append the necessary information to name the text field and the button.
 	 *
 	 * @param namePrefix the accessible name prefix to assign to the filter component. For
@@ -276,6 +276,7 @@ public class GTree extends JPanel implements BusyListener {
 	}
 
 	public void dispose() {
+
 		ignoredNodes.clear();
 		filterUpdateManager.dispose();
 		worker.dispose();
@@ -283,6 +284,7 @@ public class GTree extends JPanel implements BusyListener {
 		if (realModelRootNode != null) {
 			realModelRootNode.dispose();
 		}
+
 		// if there is a filter applied, clean up the filtered nodes. Note that filtered nodes
 		// are expected to be shallow clones of the model nodes, so we don't want to call full
 		// dispose on the filtered nodes because internal clean-up should happen when the
@@ -290,6 +292,9 @@ public class GTree extends JPanel implements BusyListener {
 		if (realViewRootNode != null && realViewRootNode != realModelRootNode) {
 			realViewRootNode.disposeClones();
 		}
+
+		filterProvider.dispose();
+
 		model.dispose();
 
 		Gui.removeThemeListener(themeListener);
@@ -385,7 +390,7 @@ public class GTree extends JPanel implements BusyListener {
 	}
 
 	/**
-	 * Sets the filter restore state.  This method is a way to override the tree's filtering 
+	 * Sets the filter restore state.  This method is a way to override the tree's filtering
 	 * behavior, which is usually set by a call to {@link #saveFilterRestoreState()}.  Most clients
 	 * will never need to call this method.
 	 * 
@@ -736,7 +741,7 @@ public class GTree extends JPanel implements BusyListener {
 	}
 
 	public void setFilterProvider(GTreeFilterProvider filterProvider) {
-		this.filterProvider = filterProvider;
+		this.filterProvider = Objects.requireNonNull(filterProvider);
 		removeAll();
 		add(mainPanel, BorderLayout.CENTER);
 		JComponent filterComponent = filterProvider.getFilterComponent();
@@ -1445,6 +1450,14 @@ public class GTree extends JPanel implements BusyListener {
 		return true;
 	}
 
+	/**
+	 * Enable or disable using double-click to open and close tree nodes.  The default is true.
+	 * @param b true to enable
+	 */
+	public void setDoubleClickExpansionEnabled(boolean b) {
+		tree.setToggleClickCount(b ? 2 : 0);
+	}
+
 //==================================================================================================
 // Inner Classes
 //==================================================================================================
@@ -1778,6 +1791,39 @@ public class GTree extends JPanel implements BusyListener {
 		expandTreeAction.setHelpLocation(new HelpLocation("Trees", "Expand_Tree"));
 		//@formatter:on
 
+		GTreeAction activateFilterAction = new GTreeAction("Table/Tree Activate Filter", owner) {
+			@Override
+			public void actionPerformed(ActionContext context) {
+				GTree gTree = (GTree) context.getSourceComponent();
+				gTree.filterProvider.activate();
+			}
+		};
+		//@formatter:off
+		activateFilterAction.setPopupMenuData(new MenuData(
+				new String[] { "Activate Filter" },
+				null,
+				actionMenuGroup, NO_MNEMONIC,
+				Integer.toString(subGroupIndex++)
+			)
+		);
+		activateFilterAction.setKeyBindingData(new KeyBindingData("Control F"));
+		activateFilterAction.setHelpLocation(new HelpLocation("Trees", "Toggle_Filter"));
+		
+		GTreeAction toggleFilterAction = new GTreeAction("Table/Tree Toggle Filter", owner) {
+			@Override
+			public void actionPerformed(ActionContext context) {
+				GTree gTree = (GTree) context.getSourceComponent();
+				gTree.filterProvider.toggleVisibility();				
+			}
+		};
+		//@formatter:on
+		toggleFilterAction.setPopupMenuData(new MenuData(
+			new String[] { "Toggle Filter" },
+			null,
+			actionMenuGroup, NO_MNEMONIC,
+			Integer.toString(subGroupIndex++)));
+		toggleFilterAction.setHelpLocation(new HelpLocation("Trees", "Toggle_Filter"));
+
 		// these actions are self-explanatory and do need help
 		collapseAction.markHelpUnnecessary();
 		expandAction.markHelpUnnecessary();
@@ -1788,6 +1834,8 @@ public class GTree extends JPanel implements BusyListener {
 		toolActions.addGlobalAction(expandAction);
 		toolActions.addGlobalAction(collapseTreeAction);
 		toolActions.addGlobalAction(expandTreeAction);
+		toolActions.addGlobalAction(activateFilterAction);
+		toolActions.addGlobalAction(toggleFilterAction);
 	}
 
 	private static String generateFilterPreferenceKey() {
